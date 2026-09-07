@@ -85,7 +85,7 @@ button:hover {{ background:#0f4b3d; }}
 <p>Upload an invoice PDF. PaddleOCR reads it, local AI understands the layout, and validation checks the totals.</p>
 <p class="hint"><strong>Parser:</strong> Hybrid Local AI v2 (Ollama + spatial fallback)</p>
 {safe_message}
-<form method="post" enctype="multipart/form-data">
+<form method="post" enctype="multipart/form-data" onsubmit="const b=this.querySelector('button'); b.textContent='Processing OCR... please wait'; b.disabled=true;">
 <label>PDF file<input type="file" name="pdf" accept="application/pdf,.pdf" required></label>
 <label>Languages<select name="languages"><option value="eng+ara">English + Arabic</option><option value="eng">English only</option><option value="ara">Arabic only</option><option value="eng+urd">English + Urdu</option></select></label>
 <label>Output<select name="format"><option value="invoice">Formatted Invoice JSON (AI + validated)</option><option value="json">Raw OCR JSON (technical boxes)</option></select></label>
@@ -181,7 +181,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json; charset=utf-8")
                 suffix = "invoice" if output_format == "invoice" else "ocr"
-                self.send_header("Content-Disposition", f'attachment; filename="{Path(filename).stem}-{suffix}.json"')
+                self.send_header("Content-Disposition", f'inline; filename="{Path(filename).stem}-{suffix}.json"')
                 self.send_header("Content-Length", str(len(data)))
                 self.end_headers()
                 self.wfile.write(data)
@@ -211,7 +211,7 @@ class Handler(BaseHTTPRequestHandler):
                 data = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json; charset=utf-8")
-                self.send_header("Content-Disposition", f'attachment; filename="{Path(filename).stem}-ocr.json"')
+                self.send_header("Content-Disposition", f'inline; filename="{Path(filename).stem}-ocr.json"')
                 self.send_header("Content-Length", str(len(data)))
                 self.end_headers()
                 self.wfile.write(data)
