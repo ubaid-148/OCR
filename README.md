@@ -39,6 +39,10 @@ python ocr_web.py
 
 Open <http://127.0.0.1:8765> and upload a PDF invoice.
 
+## Google Colab
+
+[Open the setup notebook in Colab](https://colab.research.google.com/github/AqsaTech-Peppol/OCR/blob/main/colab_setup.ipynb), then select **Runtime > Run all**. A T4 GPU runtime is recommended. The notebook installs dependencies, optionally starts Ollama, launches the OCR server, and embeds the application in Colab.
+
 ## Flow
 
 1. `ocr_web.py` receives and validates the PDF upload.
