@@ -1,0 +1,10 @@
+.paddle-venv/
+OCRmyPDF/
+__pycache__/
+*.py[cod]
+.codex-run/
+.tools/
+uploads/*
+!uploads/.gitkeep
+*.log
+.env
