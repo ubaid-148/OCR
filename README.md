@@ -41,7 +41,7 @@ Open <http://127.0.0.1:8765> and upload a PDF invoice.
 
 ## Google Colab
 
-[Open the setup notebook in Colab](https://colab.research.google.com/github/AqsaTech-Peppol/OCR/blob/main/colab_setup.ipynb), then select **Runtime > Run all**. A T4 GPU runtime is recommended. The notebook installs dependencies, optionally starts Ollama, launches the OCR server, and embeds the application in Colab.
+[Open the setup notebook in Colab](https://colab.research.google.com/github/AqsaTech-Peppol/OCR/blob/main/colab_setup.ipynb). Because this repository is private, first add a Colab secret named `GITHUB_TOKEN` with read access to the repository and enable notebook access. Then select **Runtime > Run all**. A T4 GPU runtime is recommended. The notebook installs dependencies, optionally starts Ollama, launches the OCR server, and embeds the application in Colab.
 
 ## Flow
 
