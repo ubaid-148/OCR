@@ -1,9 +1,14 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 from pathlib import Path
+
+# oneDNN currently fails on some Colab CPU runtimes while converting PIR
+# attributes. The regular Paddle inference path is slower but portable.
+os.environ.setdefault("FLAGS_use_mkldnn", "0")
 
 import pypdfium2 as pdfium
 from paddleocr import PaddleOCR
@@ -73,6 +78,7 @@ def main() -> int:
         use_doc_orientation_classify=False,
         use_doc_unwarping=False,
         use_textline_orientation=False,
+        enable_mkldnn=False,
     )
     document = pdfium.PdfDocument(str(input_path))
     pages = []
