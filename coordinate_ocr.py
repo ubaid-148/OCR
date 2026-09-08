@@ -4,6 +4,8 @@ import json
 import os
 import sys
 import tempfile
+import threading
+from time import perf_counter
 from pathlib import Path
 
 # oneDNN currently fails on some Colab CPU runtimes while converting PIR
@@ -18,6 +20,10 @@ LANGUAGE_MAP = {
     "eng": "en", "ara": "ar", "eng+ara": "ar",
     "urd": "ar", "eng+urd": "ar",
 }
+
+# PDFium and Paddle predictors are shared native resources: serialize jobs.
+_OCR_LOCK = threading.Lock()
+_MODELS = {}
 
 
 def result_payload(result: object) -> dict[str, object]:
@@ -61,13 +67,9 @@ def extract_words(result: object) -> list[dict[str, object]]:
     return words
 
 
-def main() -> int:
-    if len(sys.argv) != 4:
-        raise SystemExit("usage: coordinate_ocr.py INPUT.pdf OUTPUT.json LANGUAGES")
-    input_path = Path(sys.argv[1]).resolve()
-    output_path = Path(sys.argv[2]).resolve()
-    languages = sys.argv[3]
-    paddle_language = LANGUAGE_MAP.get(languages, "ar")
+def _get_model(paddle_language: str):
+    if paddle_language in _MODELS:
+        return _MODELS[paddle_language]
     recognition_model = (
         "PP-OCRv5_mobile_rec" if paddle_language == "en"
         else "arabic_PP-OCRv5_mobile_rec"
@@ -80,14 +82,38 @@ def main() -> int:
         use_textline_orientation=False,
         enable_mkldnn=False,
     )
-    document = pdfium.PdfDocument(str(input_path))
+    _MODELS[paddle_language] = ocr
+    return ocr
+
+
+def extract_pdf(input_path: Path, languages: str) -> dict[str, object]:
+    started = perf_counter()
+    with _OCR_LOCK:
+        acquired = perf_counter()
+        paddle_language = LANGUAGE_MAP.get(languages, "ar")
+        ocr = _get_model(paddle_language)
+        loaded = perf_counter()
+        payload = _extract_pdf(input_path, languages, paddle_language, ocr)
+        payload["timings_seconds"] = {
+            "queue": round(acquired - started, 3),
+            "model_load": round(loaded - acquired, 3),
+            "render_and_ocr": round(perf_counter() - loaded, 3),
+        }
+        return payload
+
+
+def _extract_pdf(input_path, languages, paddle_language, ocr):
     pages = []
     render_dpi = 200
-    with tempfile.TemporaryDirectory(prefix="paddle-ocr-") as temp_dir:
+    with pdfium.PdfDocument(str(input_path)) as document, tempfile.TemporaryDirectory(prefix="paddle-ocr-") as temp_dir:
         temp_root = Path(temp_dir)
         for number, page in enumerate(document, start=1):
             image_path = temp_root / f"page-{number}.png"
-            page.render(scale=render_dpi / 72).to_pil().convert("RGB").save(image_path)
+            bitmap = page.render(scale=render_dpi / 72)
+            try:
+                bitmap.to_pil().convert("RGB").save(image_path)
+            finally:
+                bitmap.close()
             words = []
             for prediction in ocr.predict(str(image_path)):
                 words.extend(extract_words(prediction))
@@ -97,10 +123,19 @@ def main() -> int:
                 "words": words,
                 "text": "\n".join(item["text"] for item in words),
             })
-    output_path.write_text(json.dumps({
+            page.close()
+    return {
         "engine": f"PaddleOCR 3 ({paddle_language})",
         "language": languages, "pages": pages,
-    }, ensure_ascii=False, indent=2), encoding="utf-8")
+    }
+
+
+def main() -> int:
+    if len(sys.argv) != 4:
+        raise SystemExit("usage: coordinate_ocr.py INPUT.pdf OUTPUT.json LANGUAGES")
+    payload = extract_pdf(Path(sys.argv[1]).resolve(), sys.argv[3])
+    Path(sys.argv[2]).resolve().write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     return 0
 
 

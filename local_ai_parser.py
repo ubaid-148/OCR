@@ -126,13 +126,14 @@ def _ask_ollama(pages: list[dict[str, Any]]) -> dict[str, Any]:
     body = json.dumps({
         "model": OLLAMA_MODEL, "stream": False, "format": INVOICE_SCHEMA,
         "options": {"temperature": 0},
+        "keep_alive": "30m",
         "messages": [
             {"role": "system", "content": "You are a careful bilingual invoice document-understanding parser. Return only schema-valid JSON."},
             {"role": "user", "content": prompt},
         ],
     }).encode("utf-8")
     request = urllib.request.Request(OLLAMA_URL, data=body, headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(request, timeout=300) as response:
+    with urllib.request.urlopen(request, timeout=float(os.environ.get("OLLAMA_TIMEOUT_SECONDS", "60"))) as response:
         result = json.loads(response.read().decode("utf-8"))
     content = result.get("message", {}).get("content")
     parsed = json.loads(content) if isinstance(content, str) else content
@@ -141,8 +142,16 @@ def _ask_ollama(pages: list[dict[str, Any]]) -> dict[str, Any]:
     return parsed
 
 
-def parse_invoice_hybrid(pages: list[dict[str, Any]], source_filename: str, language: str) -> dict[str, Any]:
+def parse_invoice_hybrid(pages: list[dict[str, Any]], source_filename: str, language: str, mode: str = "auto") -> dict[str, Any]:
     fallback = parse_invoice(pages, source_filename, language)
+    if mode == "fast" or os.environ.get("USE_LOCAL_AI", "true").lower() in {"false", "0", "no"}:
+        fallback["quality"]["parser"] = "spatial_fast"
+        fallback["quality"]["local_ai_status"] = "disabled"
+        return fallback
+    if not fallback["quality"]["needs_review"] and fallback["data"]["invoice"].get("date"):
+        fallback["quality"]["parser"] = "spatial_verified"
+        fallback["quality"]["local_ai_status"] = "skipped_verified"
+        return fallback
     try:
         data = _ask_ollama(pages)
         data.update({

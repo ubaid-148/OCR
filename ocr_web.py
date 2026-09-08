@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import uuid
+from time import perf_counter
 from email import policy
 from email.parser import BytesParser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -88,6 +89,7 @@ button:hover {{ background:#0f4b3d; }}
 <form method="post" enctype="multipart/form-data" onsubmit="const b=this.querySelector('button'); b.textContent='Processing OCR... please wait'; b.disabled=true;">
 <label>PDF file<input type="file" name="pdf" accept="application/pdf,.pdf" required></label>
 <label>Languages<select name="languages"><option value="eng+ara">English + Arabic</option><option value="eng">English only</option><option value="ara">Arabic only</option><option value="eng+urd">English + Urdu</option></select></label>
+<label>Processing<select name="mode"><option value="auto">Balanced (AI only when review is needed)</option><option value="fast">Fast (spatial parser, no AI)</option></select></label>
 <label>Output<select name="format"><option value="invoice">Formatted Invoice JSON (AI + validated)</option><option value="json">Raw OCR JSON (technical boxes)</option></select></label>
 <p class="hint">PaddleOCR uses Arabic recognition for Arabic/Urdu selections; it also handles Latin text and numbers.</p>
 <button type="submit">Run PaddleOCR</button>
@@ -122,6 +124,8 @@ class Handler(BaseHTTPRequestHandler):
         pdf_part = next((part for part in message.iter_attachments() if part.get_param("name", header="content-disposition") == "pdf"), None)
         language_part = next((part for part in message.iter_attachments() if part.get_param("name", header="content-disposition") == "languages"), None)
         format_part = next((part for part in message.iter_attachments() if part.get_param("name", header="content-disposition") == "format"), None)
+        mode_part = next((part for part in message.iter_attachments() if part.get_param("name", header="content-disposition") == "mode"), None)
+        mode = "fast" if mode_part and mode_part.get_content().strip() == "fast" else "auto"
         if pdf_part is None:
             self.send_html(page("No PDF was received."), 400)
             return
@@ -154,18 +158,24 @@ class Handler(BaseHTTPRequestHandler):
         ]
         try:
             if output_format in {"invoice", "json"}:
-                coordinate_result = subprocess.run(
-                    [str(PYTHON_EXE), str(COORDINATE_SCRIPT), str(input_path), str(coordinate_path), languages],
-                    env=env,
-                    capture_output=True,
-                    text=True,
-                    timeout=1800,
-                )
-                if coordinate_result.returncode != 0 or not coordinate_path.exists():
-                    detail = (coordinate_result.stderr or coordinate_result.stdout or "Coordinate OCR failed").strip()
-                    self.send_html(page(f"OCR failed:\n{detail}"), 500)
-                    return
-                coordinate_payload = json.loads(coordinate_path.read_text(encoding="utf-8"))
+                started = perf_counter()
+                if os.environ.get("OCR_PYTHON_EXE"):
+                    coordinate_result = subprocess.run(
+                        [str(PYTHON_EXE), str(COORDINATE_SCRIPT), str(input_path), str(coordinate_path), languages],
+                        env=env,
+                        capture_output=True,
+                        text=True,
+                        timeout=1800,
+                    )
+                    if coordinate_result.returncode != 0 or not coordinate_path.exists():
+                        detail = (coordinate_result.stderr or coordinate_result.stdout or "Coordinate OCR failed").strip()
+                        self.send_html(page(f"OCR failed:\n{detail}"), 500)
+                        return
+                    coordinate_payload = json.loads(coordinate_path.read_text(encoding="utf-8"))
+                else:
+                    from coordinate_ocr import extract_pdf
+                    coordinate_payload = extract_pdf(input_path, languages)
+                ocr_finished = perf_counter()
                 raw_text = "\n".join(item.get("text", "") for item in coordinate_payload["pages"])
                 payload: dict[str, object] = {
                     "source_filename": filename,
@@ -175,8 +185,14 @@ class Handler(BaseHTTPRequestHandler):
                 }
                 if output_format == "invoice":
                     payload = parse_invoice_hybrid(
-                        coordinate_payload["pages"], filename, languages
+                        coordinate_payload["pages"], filename, languages, mode=mode
                     )
+                payload["timings_seconds"] = {
+                    **coordinate_payload.get("timings_seconds", {}),
+                    "ocr_total": round(ocr_finished - started, 3),
+                    "invoice_parser": round(perf_counter() - ocr_finished, 3),
+                    "total": round(perf_counter() - started, 3),
+                }
                 data = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -225,6 +241,9 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(data)
         except subprocess.TimeoutExpired:
             self.send_html(page("OCR timed out after 30 minutes."), 504)
+        except Exception as error:
+            self.log_message("OCR failed: %s", error)
+            self.send_html(page(f"OCR failed: {error}"), 500)
         finally:
             for path in (input_path, output_path, sidecar_path, coordinate_path):
                 try:

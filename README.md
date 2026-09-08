@@ -41,7 +41,7 @@ Open <http://127.0.0.1:8765> and upload a PDF invoice.
 
 ## Google Colab
 
-[Open the setup notebook in Colab](https://colab.research.google.com/github/ubaid-148/OCR/blob/main/colab_setup.ipynb), then select **Runtime > Run all**. For a private repository, add a Colab secret named `GITHUB_TOKEN` with read access and enable notebook access; public repositories need no token. A T4 GPU runtime is recommended. The notebook installs dependencies, optionally starts Ollama, launches the OCR server, and embeds the application in Colab.
+[Open the setup notebook in Colab](https://colab.research.google.com/github/ubaid-148/OCR/blob/main/colab_setup.ipynb), then select **Runtime > Run all**. For a private repository, add a Colab secret named `GITHUB_TOKEN` with read access and enable notebook access; public repositories need no token. The pinned Paddle package runs OCR on CPU; a T4 GPU can accelerate Ollama. The notebook installs dependencies, optionally starts Ollama, launches the OCR server, and embeds the application in Colab.
 
 ## Flow
 
@@ -50,3 +50,25 @@ Open <http://127.0.0.1:8765> and upload a PDF invoice.
 3. `local_ai_parser.py` asks local Ollama for schema-valid invoice JSON.
 4. `invoice_formatter.py` provides deterministic spatial parsing and validation.
 5. Temporary files are removed after each request.
+
+## Processing speed
+
+The web server keeps Paddle models in memory between uploads (one model per
+recognition language). The first upload still loads models. OCR jobs are
+serialized because the native predictor and PDFium resources are shared.
+Run the server with the Python environment containing PaddleOCR. If you set
+`OCR_PYTHON_EXE`, the legacy subprocess path is used and models reload per upload.
+
+Balanced mode skips Ollama when spatial parsing passes its checks and includes
+an invoice date. Fast mode skips AI entirely; unfamiliar layouts may need more
+manual review. Neither mode lowers the 200 DPI rendering resolution.
+`USE_LOCAL_AI=false` disables AI globally. `OLLAMA_TIMEOUT_SECONDS` defaults to
+60 seconds (HTTP socket timeout, not an overall job deadline). Ollama is asked
+to keep its model loaded for 30 minutes.
+
+JSON output includes `timings_seconds` for OCR, invoice parsing, and total
+processing; the persistent path also reports queue, model load, and render/OCR.
+Compare the first and second uploads of the same PDF in Colab to measure the
+warm-model improvement. No fixed latency is guaranteed; page count, layout,
+hardware, and runtime load matter. Update the repository copy before rerunning
+the Colab notebook: cell 1 downloads the GitHub main branch.
