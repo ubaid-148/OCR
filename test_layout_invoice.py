@@ -11,6 +11,22 @@ def box(text, x, y, scale=1):
 
 
 class LayoutInvoiceTests(unittest.TestCase):
+    def test_wrapped_description_and_partial_row_are_retained(self):
+        words = [box(t,x,300) for t,x in [("Description",100),("Qty",400),("Rate",600),("Amount",800)]]
+        words += [box(t,x,360) for t,x in [("Steel hinge",100),("2",400),("3",600),("6",800)]]
+        words += [box("heavy duty",100,382)]
+        words += [box(t,x,440) for t,x in [("Door bolt",100),("1",400),("4",800)]]
+        rows,_,_ = table(words)
+        self.assertEqual(len(rows),2)
+        self.assertEqual(rows[0]["description"], "Steel hinge heavy duty")
+        self.assertIsNone(rows[1]["unit_price"])
+        self.assertEqual(rows[1]["amount"],4)
+
+    def test_numeric_separators(self):
+        self.assertEqual(numeric("1,234.56"),1234.56)
+        self.assertEqual(numeric("١٬٢٣٤٫٥٦"),1234.56)
+        self.assertEqual(numeric("1,5 SET"),1.5)
+
     def test_ai_input_keeps_every_box_and_page(self):
         pages = [dict(page=n, width=600, height=800, render_dpi=200,
                       words=[box("Item B", 400, 400), box("Item A", 100, 100)]) for n in (1,2)]

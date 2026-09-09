@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 from statistics import median
 
-from invoice_formatter import center, contains, has_arabic, normalize, number_string
+from invoice_formatter import DIGIT_TABLE, center, contains, has_arabic, normalize, number_string
 
 
 ALIASES = {
@@ -17,7 +17,9 @@ ALIASES = {
 
 
 def numeric(text):
-    text = normalize(text).replace("٬", "").replace("٫", ".")
+    text = " ".join(text.translate(DIGIT_TABLE).replace("٬", "").replace("٫", ".").split())
+    text = re.sub(r"(?<=\d),(?=\d{3}(?:[, .]|$))", "", text)
+    text = text.replace(",", ".")
     # Values may carry units, but addresses, percentages and embedded IDs are not money.
     match = re.fullmatch(r"\s*[:#]?\s*([0-9]+(?:\.[0-9]+)?)\s*(?:[A-Za-z]+|ريال|#)?\s*", text)
     return float(match[1]) if match else None
@@ -49,7 +51,8 @@ def table(words):
         anchors = [w for w in body if numeric(w["text"]) is not None
                    and abs(center(w)[0]-hx["quantity"]) <= tolerance]
         items = []
-        for anchor in sorted(anchors, key=lambda w: center(w)[1]):
+        anchors.sort(key=lambda w: center(w)[1])
+        for row_index, anchor in enumerate(anchors):
             row = [w for w in body if abs(center(w)[1]-center(anchor)[1]) < h*.8]
             def cell(key):
                 candidates = [w for w in row if numeric(w["text"]) is not None
@@ -58,14 +61,26 @@ def table(words):
             price, amount = cell("unit_price"), cell("amount")
             desc = [w for w in row if numeric(w["text"]) is None
                     and min(hx, key=lambda k: abs(center(w)[0]-hx[k])) == "description"]
-            if not price or not amount or price is amount or not desc:
+            if price is anchor:
+                price = None
+            if amount is anchor or (price is not None and amount is price):
+                amount = None
+            # Retain partially read rows so validation/AI can repair them. Dropping
+            # a row hides the OCR failure and makes a short table look complete.
+            if not desc or (price is None and amount is None):
                 continue
+            next_y = center(anchors[row_index+1])[1] if row_index+1 < len(anchors) else stop
+            continuation = [w for w in body if h*.8 <= center(w)[1]-center(anchor)[1] <= h*2.5
+                            and center(w)[1] < next_y-h*.8 and numeric(w["text"]) is None
+                            and min(hx, key=lambda k: abs(center(w)[0]-hx[k])) == "description"
+                            and not contains(w["text"], ("subtotal", "total", "vat", "tax", "الإجمالي"))]
+            desc += continuation
             code = next((w["text"] for w in row if "item_code" in hx
                          and min(hx, key=lambda k: abs(center(w)[0]-hx[k])) == "item_code"), None)
             items.append(dict(line_no=len(items)+1, item_code=code,
-                              description=" ".join(w["text"] for w in sorted(desc, key=lambda w: w["left"])),
-                              quantity=numeric(anchor["text"]), unit_price=numeric(price["text"]),
-                              amount=numeric(amount["text"])))
+                              description=" ".join(w["text"] for w in sorted(desc, key=lambda w: (round(center(w)[1]/h), w["left"]))),
+                              quantity=numeric(anchor["text"]), unit_price=numeric(price["text"]) if price else None,
+                              amount=numeric(amount["text"]) if amount else None))
         if items:
             return items, header_y, h
     return [], None, h

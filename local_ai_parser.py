@@ -9,6 +9,7 @@ from typing import Any
 
 from invoice_formatter import parse_invoice
 from layout_invoice import parse_layout
+from invoice_evidence import audit_ai
 
 
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434/api/chat")
@@ -83,14 +84,20 @@ def _validate(data: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
         "net_expected": float(net_expected) if net_expected is not None else None, "net_amount_valid": net_valid,
     }
     required = {
+        "supplier.name": data["supplier"].get("name_ar") or data["supplier"].get("name_en"),
         "supplier.vat_number": data.get("supplier", {}).get("vat_number"),
         "invoice.invoice_number": data.get("invoice", {}).get("invoice_number"),
         "invoice.date": data.get("invoice", {}).get("date"),
         "customer.vat_number": data.get("customer", {}).get("vat_number"),
+        "customer.name": data["customer"].get("name"),
         "items": items, "totals.subtotal": totals.get("subtotal"),
         "totals.vat_amount": totals.get("vat_amount"), "totals.net_amount": totals.get("net_amount"),
     }
     missing = [key for key, value in required.items() if value in (None, "", [])]
+    for index, item in enumerate(items):
+        for key in ("description", "quantity", "unit_price", "amount"):
+            if item.get(key) in (None, ""):
+                missing.append(f"items[{index}].{key}")
     calculations_valid = all((validation["items_calculation_valid"], subtotal_valid, vat_valid, net_valid))
     needs_review = bool(missing or not calculations_valid)
     quality = {
@@ -133,7 +140,7 @@ def _ask_ollama(pages: list[dict[str, Any]]) -> dict[str, Any]:
     )
     body = json.dumps({
         "model": OLLAMA_MODEL, "stream": False, "format": INVOICE_SCHEMA,
-        "options": {"temperature": 0},
+        "options": {"temperature": 0, "num_ctx": int(os.environ.get("OLLAMA_NUM_CTX", "8192"))},
         "keep_alive": "30m",
         "messages": [
             {"role": "system", "content": "You are a careful bilingual invoice document-understanding parser. Return only schema-valid JSON."},
@@ -143,6 +150,10 @@ def _ask_ollama(pages: list[dict[str, Any]]) -> dict[str, Any]:
     request = urllib.request.Request(OLLAMA_URL, data=body, headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(request, timeout=float(os.environ.get("OLLAMA_TIMEOUT_SECONDS", "60"))) as response:
         result = json.loads(response.read().decode("utf-8"))
+    if result.get("error"):
+        raise ValueError(f"Ollama failed: {result['error']}")
+    if result.get("done") is False or result.get("done_reason") == "length":
+        raise ValueError("Ollama response was truncated; incomplete invoice output rejected")
     content = result.get("message", {}).get("content")
     parsed = json.loads(content) if isinstance(content, str) else content
     if not isinstance(parsed, dict):
@@ -150,8 +161,27 @@ def _ask_ollama(pages: list[dict[str, Any]]) -> dict[str, Any]:
     return parsed
 
 
+def _result_score(result):
+    """Prefer checked, complete candidates; do not replace useful rows with blanks."""
+    quality = result["quality"]
+    checks = result["data"].get("validation", {})
+    valid_rows = sum(bool(item.get("valid")) for item in checks.get("item_checks", []))
+    return (not quality["needs_review"],
+            sum(checks.get(key) is True for key in ("subtotal_valid", "vat_valid", "net_amount_valid")),
+            valid_rows, -len(quality.get("missing_fields", [])),
+            -len(quality.get("evidence_issues", [])))
+
+
 def parse_invoice_hybrid(pages: list[dict[str, Any]], source_filename: str, language: str, mode: str = "auto") -> dict[str, Any]:
     fallback = parse_invoice(pages, source_filename, language)
+    checks, quality = _validate(fallback["data"])
+    quality["low_confidence_fields"] = fallback["quality"].get("low_confidence_fields", [])
+    if quality["low_confidence_fields"]:
+        quality.update(needs_review=True, overall_status="needs_review")
+    quality["parser"] = "spatial_legacy"
+    quality.pop("model", None)
+    fallback["data"]["validation"] = checks
+    fallback["quality"] = quality
     layout = parse_layout(pages, source_filename, language)
     if layout is not None and len(layout["items"]) >= len(fallback["data"]["items"]):
         validation, quality = _validate(layout)
@@ -180,15 +210,24 @@ def parse_invoice_hybrid(pages: list[dict[str, Any]], source_filename: str, lang
             "source_filename": source_filename,
         })
         validation, quality = _validate(data)
+        issues, evidence = audit_ai(data, pages)
+        validation, quality = _validate(data)
+        quality["evidence_issues"] = issues
+        quality["field_evidence"] = evidence
+        if issues:
+            quality["needs_review"] = True
+            quality["overall_status"] = "needs_review"
         data["validation"] = validation
         ai_result = {"data": data, "quality": quality}
         # Never replace a locally verified result with AI output that fails
         # arithmetic or required-field validation. This guard is important for
         # small CPU-friendly models, which can understand layout but still swap
         # nearby numbers.
-        if quality["needs_review"] and not fallback["quality"]["needs_review"]:
-            fallback["quality"]["parser"] = "spatial_verified_after_local_ai_review"
-            fallback["quality"]["local_ai_status"] = "rejected_by_validation"
+        if (_result_score(ai_result) < _result_score(fallback)
+                or len(data.get("items", [])) < len(fallback["data"].get("items", []))):
+            fallback["quality"]["parser"] = "spatial_after_local_ai_review"
+            fallback["quality"]["local_ai_status"] = "rejected_less_complete_result"
+            fallback["quality"]["local_ai_evidence_issues"] = issues
             return fallback
         return ai_result
     except (OSError, ValueError, KeyError, json.JSONDecodeError, urllib.error.URLError) as error:

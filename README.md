@@ -120,4 +120,22 @@ and OCR spelling errors can still require review. Passing arithmetic checks is
 not proof that every field matches the source PDF. The supplied 9612 OCR payload
 was replayed locally; the original PDF and live Colab inference were not tested.
 
-Run parser regression checks with `python -m unittest test_invoice_parsing test_layout_invoice`.
+Run parser regression checks with `python -m unittest test_invoice_parsing test_layout_invoice test_invoice_evidence`.
+
+The parser retains rows with a missing price or amount and attaches nearby
+wrapped description lines, so incomplete rows remain visible for review.
+Missing supplier/customer names and item descriptions also trigger review.
+AI-generated identifiers, dates and numeric values are checked against OCR;
+unsupported values become null and receive an evidence issue. Supported AI
+fields include their OCR page, text and confidence. Presence in OCR alone does
+not prove the correct role or column was chosen. Names and descriptions are not
+covered by this occurrence check. AI results with fewer rows or a worse
+validation/completeness score do not replace the spatial result.
+
+Colab now preloads Ollama during cell 3 and displays `ollama ps` to show GPU/CPU
+placement. Chat requests use an explicit 8192-token context, configurable with
+`OLLAMA_NUM_CTX`. Preloading follows the [Ollama API guidance](https://docs.ollama.com/faq#how-can-i-preload-a-model-into-ollama-to-get-faster-response-times).
+Truncated AI responses are rejected. Setup loading has a 180-second socket
+timeout; invoice requests retain the 60-second socket timeout. These changes
+have local regression coverage, not a measured accuracy percentage across a
+production invoice dataset or a live Colab/Ollama benchmark.
