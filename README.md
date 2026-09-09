@@ -53,6 +53,13 @@ Open <http://127.0.0.1:8765> and upload a PDF invoice.
 
 ## Processing speed
 
+Colab installs OCR into `/content/ocr-runtime`, isolated from the notebook's
+preinstalled packages. Both runtime verification and the web server use that
+environment. ModelScope uses CPU PyTorch there, while Paddle still uses the GPU;
+this avoids the observed `libtorch_cuda.so: undefined symbol: ncclCommShrink`
+failure from mixing PyTorch and Paddle CUDA dependencies. CPU PyTorch installation
+follows https://pytorch.org/get-started/previous-versions/ .
+
 The server automatically selects CUDA when available. Set `OCR_DEVICE=cpu` or
 `OCR_DEVICE=gpu:0` to override; requesting an unavailable GPU raises an error.
 Output includes `ocr_device` so you can confirm GPU use. CPU inference uses at
