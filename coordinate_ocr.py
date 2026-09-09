@@ -13,6 +13,7 @@ from pathlib import Path
 os.environ.setdefault("FLAGS_use_mkldnn", "0")
 
 import pypdfium2 as pdfium
+import paddle
 from paddleocr import PaddleOCR
 
 
@@ -24,6 +25,16 @@ LANGUAGE_MAP = {
 # PDFium and Paddle predictors are shared native resources: serialize jobs.
 _OCR_LOCK = threading.Lock()
 _MODELS = {}
+
+
+def get_ocr_device() -> str:
+    device = os.environ.get("OCR_DEVICE", "auto").strip().lower()
+    gpu_available = paddle.is_compiled_with_cuda() and paddle.device.cuda.device_count() > 0
+    if device == "auto":
+        return "gpu:0" if gpu_available else "cpu"
+    if device.startswith("gpu") and not gpu_available:
+        raise RuntimeError("OCR_DEVICE requests GPU, but Paddle cannot access CUDA. Install paddlepaddle-gpu and select a GPU runtime.")
+    return device
 
 
 def result_payload(result: object) -> dict[str, object]:
@@ -75,6 +86,8 @@ def _get_model(paddle_language: str):
         else "arabic_PP-OCRv5_mobile_rec"
     )
     ocr = PaddleOCR(
+        device=get_ocr_device(),
+        cpu_threads=max(1, min(4, os.cpu_count() or 1)),
         text_detection_model_name="PP-OCRv5_mobile_det",
         text_recognition_model_name=recognition_model,
         use_doc_orientation_classify=False,
@@ -94,6 +107,7 @@ def extract_pdf(input_path: Path, languages: str) -> dict[str, object]:
         ocr = _get_model(paddle_language)
         loaded = perf_counter()
         payload = _extract_pdf(input_path, languages, paddle_language, ocr)
+        payload["device"] = get_ocr_device()
         payload["timings_seconds"] = {
             "queue": round(acquired - started, 3),
             "model_load": round(loaded - acquired, 3),

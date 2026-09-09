@@ -41,7 +41,7 @@ Open <http://127.0.0.1:8765> and upload a PDF invoice.
 
 ## Google Colab
 
-[Open the setup notebook in Colab](https://colab.research.google.com/github/ubaid-148/OCR/blob/main/colab_setup.ipynb), then select **Runtime > Run all**. For a private repository, add a Colab secret named `GITHUB_TOKEN` with read access and enable notebook access; public repositories need no token. The pinned Paddle package runs OCR on CPU; a T4 GPU can accelerate Ollama. The notebook installs dependencies, optionally starts Ollama, launches the OCR server, and embeds the application in Colab.
+[Open the setup notebook in Colab](https://colab.research.google.com/github/ubaid-148/OCR/blob/main/colab_setup.ipynb), select **Runtime > Change runtime type > T4 GPU**, then **Runtime > Run all**. For a private repository, add a Colab secret named `GITHUB_TOKEN` with read access and enable notebook access; public repositories need no token. The notebook installs GPU Paddle on GPU runtimes and CPU Paddle otherwise, and verifies the installation in a fresh process. A GPU installation failure stops setup instead of silently running OCR on CPU. Local AI is disabled by default for speed; enable `USE_LOCAL_AI` in cell 3 when needed for unfamiliar layouts.
 
 ## Flow
 
@@ -52,6 +52,18 @@ Open <http://127.0.0.1:8765> and upload a PDF invoice.
 5. Temporary files are removed after each request.
 
 ## Processing speed
+
+The server automatically selects CUDA when available. Set `OCR_DEVICE=cpu` or
+`OCR_DEVICE=gpu:0` to override; requesting an unavailable GPU raises an error.
+Output includes `ocr_device` so you can confirm GPU use. CPU inference uses at
+most four threads, limited by the available CPU count. Model choice and 200 DPI
+resolution are unchanged. Fast/spatial parsing can require manual field review.
+
+After updating these files on GitHub, restart the Colab runtime and run the
+updated notebook. Cell 2 should print `OCR device: gpu:0` on a T4 runtime.
+Compare `timings_seconds` on the first and second upload of the same PDF;
+GPU acceleration primarily targets OCR time, while disabling AI removes the
+Ollama parsing wait. GPU performance must be measured in the actual Colab runtime.
 
 The web server keeps Paddle models in memory between uploads (one model per
 recognition language). The first upload still loads models. OCR jobs are

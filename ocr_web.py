@@ -193,6 +193,7 @@ class Handler(BaseHTTPRequestHandler):
                     "invoice_parser": round(perf_counter() - ocr_finished, 3),
                     "total": round(perf_counter() - started, 3),
                 }
+                payload["ocr_device"] = coordinate_payload.get("device", "unknown")
                 data = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json; charset=utf-8")
