@@ -187,6 +187,9 @@ class Handler(BaseHTTPRequestHandler):
                     payload = parse_invoice_hybrid(
                         coordinate_payload["pages"], filename, languages, mode=mode
                     )
+                    # Preserve the evidence when parsing fails, without another OCR run.
+                    if payload.get("quality", {}).get("needs_review"):
+                        payload["raw_ocr"] = {"pages": coordinate_payload["pages"]}
                 payload["timings_seconds"] = {
                     **coordinate_payload.get("timings_seconds", {}),
                     "ocr_total": round(ocr_finished - started, 3),

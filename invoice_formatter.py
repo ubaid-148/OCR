@@ -39,8 +39,19 @@ def number_string(text: str, lengths: set[int]) -> str | None:
 
 
 def contains(text: str, aliases: tuple[str, ...]) -> bool:
-    compact = re.sub(r"[^a-z0-9]+", "", normalize(text).lower())
-    return any(re.sub(r"[^a-z0-9]+", "", alias.lower()) in compact for alias in aliases)
+    # Preserve Arabic and word boundaries: "customer" must not match
+    # "customers" in the returns policy at the bottom of an invoice.
+    tokens = re.findall(r"[^\W_]+", normalize(text).casefold())
+    for alias in aliases:
+        wanted = re.findall(r"[^\W_]+", normalize(alias).casefold())
+        if not wanted:
+            continue
+        if any(tokens[i:i + len(wanted)] == wanted for i in range(len(tokens))):
+            return True
+        # OCR sometimes joins a multi-word label, e.g. UnitPrice.
+        if len(wanted) > 1 and "".join(wanted) in tokens:
+            return True
+    return False
 
 
 def has_arabic(text: str) -> bool:
@@ -118,7 +129,8 @@ def parse_invoice(pages: list[dict[str, Any]], source_filename: str, language: s
     )
 
     supplier_name_word = next(
-        (word for word in words if re.search(r"\b[A-Z][A-Z .]{5,}\b", str(word.get("text", ""))) and "EST" in str(word.get("text", ""))),
+        (word for word in words if re.search(r"\b[A-Z][A-Z .]{5,}\b", str(word.get("text", ""))) and "EST" in str(word.get("text", ""))
+         and not normalize(str(word.get("text", ""))).lower().startswith("for ")),
         None,
     )
     supplier_name_ar = None
@@ -126,7 +138,7 @@ def parse_invoice(pages: list[dict[str, Any]], source_filename: str, language: s
         supplier_name_y = center(supplier_name_word)[1]
         arabic_header = [
             word for word in words
-            if center(word)[1] < supplier_name_y
+            if 0 < supplier_name_y - center(word)[1] <= 100
             and has_arabic(str(word.get("text", "")))
             and not re.search(r"\d", normalize(str(word.get("text", ""))))
         ]
@@ -259,6 +271,10 @@ def parse_invoice(pages: list[dict[str, Any]], source_filename: str, language: s
         for field, word in tracked.items() if word is not None and field_confidence(word) < 80
     ]
     missing = [field for field, word in tracked.items() if word is None]
+    if not items:
+        missing.append("items")
+    if not gregorian:
+        missing.append("invoice.date")
     needs_review = bool(low_confidence or missing or not all((items_valid, subtotal_valid, vat_valid, net_valid)))
 
     return {

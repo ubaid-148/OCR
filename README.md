@@ -41,7 +41,7 @@ Open <http://127.0.0.1:8765> and upload a PDF invoice.
 
 ## Google Colab
 
-[Open the setup notebook in Colab](https://colab.research.google.com/github/ubaid-148/OCR/blob/main/colab_setup.ipynb), select **Runtime > Change runtime type > T4 GPU**, then **Runtime > Run all**. For a private repository, add a Colab secret named `GITHUB_TOKEN` with read access and enable notebook access; public repositories need no token. The notebook installs GPU Paddle on GPU runtimes and CPU Paddle otherwise, and verifies the installation in a fresh process. A GPU installation failure stops setup instead of silently running OCR on CPU. Local AI is disabled by default for speed; enable `USE_LOCAL_AI` in cell 3 when needed for unfamiliar layouts.
+[Open the setup notebook in Colab](https://colab.research.google.com/github/ubaid-148/OCR/blob/main/colab_setup.ipynb), select **Runtime > Change runtime type > T4 GPU**, then **Runtime > Run all**. For a private repository, add a Colab secret named `GITHUB_TOKEN` with read access and enable notebook access; public repositories need no token. The notebook installs GPU Paddle on GPU runtimes and CPU Paddle otherwise, and verifies the installation in a fresh process. A GPU installation failure stops setup instead of silently running OCR on CPU. Local AI is enabled by default for unfamiliar layouts; Balanced mode skips it when spatial parsing passes validation. Fast mode explicitly skips AI and can miss fields on unfamiliar layouts.
 
 ## Flow
 
@@ -91,3 +91,9 @@ Compare the first and second uploads of the same PDF in Colab to measure the
 warm-model improvement. No fixed latency is guaranteed; page count, layout,
 hardware, and runtime load matter. Update the repository copy before rerunning
 the Colab notebook: cell 1 downloads the GitHub main branch.
+
+When formatted output needs review, `raw_ocr.pages` preserves the positioned OCR
+text for comparison without reprocessing the PDF. Missing items and invoice dates
+are listed explicitly. Supplier names are restricted to nearby header text;
+footer signature lines and plural words in return policies are excluded from
+name/label matching. These guards do not establish accuracy on an unseen PDF.

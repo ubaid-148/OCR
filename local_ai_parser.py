@@ -147,6 +147,12 @@ def parse_invoice_hybrid(pages: list[dict[str, Any]], source_filename: str, lang
     if mode == "fast" or os.environ.get("USE_LOCAL_AI", "true").lower() in {"false", "0", "no"}:
         fallback["quality"]["parser"] = "spatial_fast"
         fallback["quality"]["local_ai_status"] = "disabled"
+        if fallback["quality"]["needs_review"]:
+            fallback["quality"]["review_message"] = (
+                "Invoice fields are incomplete or failed validation. AI parsing is disabled. "
+                "Enable USE_LOCAL_AI in Colab cell 3, rerun cells 3 and 4, and select Balanced. "
+                "Compare raw_ocr pages with the source PDF before using these values."
+            )
         return fallback
     if not fallback["quality"]["needs_review"] and fallback["data"]["invoice"].get("date"):
         fallback["quality"]["parser"] = "spatial_verified"
