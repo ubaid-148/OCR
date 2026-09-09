@@ -139,3 +139,10 @@ Truncated AI responses are rejected. Setup loading has a 180-second socket
 timeout; invoice requests retain the 60-second socket timeout. These changes
 have local regression coverage, not a measured accuracy percentage across a
 production invoice dataset or a live Colab/Ollama benchmark.
+
+Ollama preloading is optional: a failure prints the server response and allows
+OCR startup to continue with AI still enabled. Cell 3 reuses a responding Ollama
+service rather than starting a duplicate and overwriting its log. HTTP failures
+during invoice parsing include Ollama's response in `quality.local_ai_error`.
+This exposes model/driver/memory failures; it does not itself repair them.
+Run HTTP error regressions with `python -m unittest test_ollama_http`.

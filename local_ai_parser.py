@@ -10,6 +10,7 @@ from typing import Any
 from invoice_formatter import parse_invoice
 from layout_invoice import parse_layout
 from invoice_evidence import audit_ai
+from ollama_http import request_json
 
 
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434/api/chat")
@@ -138,7 +139,7 @@ def _ask_ollama(pages: list[dict[str, Any]]) -> dict[str, Any]:
         "Use arithmetic only to disambiguate OCR candidates, not to fabricate missing values. OCR:\n"
         + json.dumps(_compact_ocr(pages), ensure_ascii=False, separators=(",", ":"))
     )
-    body = json.dumps({
+    body = {
         "model": OLLAMA_MODEL, "stream": False, "format": INVOICE_SCHEMA,
         "options": {"temperature": 0, "num_ctx": int(os.environ.get("OLLAMA_NUM_CTX", "8192"))},
         "keep_alive": "30m",
@@ -146,10 +147,8 @@ def _ask_ollama(pages: list[dict[str, Any]]) -> dict[str, Any]:
             {"role": "system", "content": "You are a careful bilingual invoice document-understanding parser. Return only schema-valid JSON."},
             {"role": "user", "content": prompt},
         ],
-    }).encode("utf-8")
-    request = urllib.request.Request(OLLAMA_URL, data=body, headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(request, timeout=float(os.environ.get("OLLAMA_TIMEOUT_SECONDS", "60"))) as response:
-        result = json.loads(response.read().decode("utf-8"))
+    }
+    result = request_json(OLLAMA_URL, body, timeout=float(os.environ.get("OLLAMA_TIMEOUT_SECONDS", "60")))
     if result.get("error"):
         raise ValueError(f"Ollama failed: {result['error']}")
     if result.get("done") is False or result.get("done_reason") == "length":
@@ -230,7 +229,8 @@ def parse_invoice_hybrid(pages: list[dict[str, Any]], source_filename: str, lang
             fallback["quality"]["local_ai_evidence_issues"] = issues
             return fallback
         return ai_result
-    except (OSError, ValueError, KeyError, json.JSONDecodeError, urllib.error.URLError) as error:
+    except (OSError, ValueError, RuntimeError, KeyError, json.JSONDecodeError, urllib.error.URLError) as error:
         fallback["quality"]["parser"] = "spatial_fallback"
-        fallback["quality"]["local_ai_error"] = str(error)[:300]
+        fallback["quality"]["local_ai_status"] = "failed"
+        fallback["quality"]["local_ai_error"] = str(error)[:2000]
         return fallback
