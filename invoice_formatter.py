@@ -24,7 +24,11 @@ def center(word: dict[str, Any]) -> tuple[float, float]:
 
 
 def money(text: str) -> Decimal | None:
-    match = re.fullmatch(r"\D*(\d{1,8}(?:\.\d{1,2})?)\D*", normalize(text))
+    match = re.fullmatch(
+        r"\s*(?:(?:SAR|USD|AED|EUR|GBP|PKR|ريال)\s*)?[:#]?\s*"
+        r"(\d{1,8}(?:\.\d{1,2})?)\s*(?:[A-Za-z]+|ريال|#)?\s*",
+        normalize(text), re.IGNORECASE,
+    )
     if not match:
         return None
     try:

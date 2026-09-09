@@ -97,3 +97,27 @@ text for comparison without reprocessing the PDF. Missing items and invoice date
 are listed explicitly. Supplier names are restricted to nearby header text;
 footer signature lines and plural words in return policies are excluded from
 name/label matching. These guards do not establish accuracy on an unseen PDF.
+
+## Different invoice layouts
+
+`layout_invoice.py` detects description, quantity, unit-price and pre-tax amount
+columns from English/Arabic header aliases and their positions on each page.
+Columns may be reordered or scaled; item codes are optional and may contain
+letters. Quantities may be fractional. Full alphanumeric invoice IDs and slash-
+or hyphen-separated dates are retained. Header aliases describe field meanings;
+the output JSON keys remain consistent across suppliers.
+
+The hybrid parser uses this result when it detects rows without dropping rows
+found by the legacy parser, then checks required fields and arithmetic. Unknown
+layouts and incomplete results still go to Ollama in Balanced mode. A compact
+`[x,y,width,height,text]` representation retains every OCR box for AI parsing.
+This reduces prompt size, but does not guarantee that Ollama finishes within
+its configured timeout. Zero tax and explicitly supplied non-15% rates are
+supported by hybrid validation; an absent rate is not assumed to be 15%.
+
+Limitations: unusual or merged table headers, wrapped item rows, mixed tax rates,
+and OCR spelling errors can still require review. Passing arithmetic checks is
+not proof that every field matches the source PDF. The supplied 9612 OCR payload
+was replayed locally; the original PDF and live Colab inference were not tested.
+
+Run parser regression checks with `python -m unittest test_invoice_parsing test_layout_invoice`.

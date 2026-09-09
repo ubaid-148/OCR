@@ -8,6 +8,7 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any
 
 from invoice_formatter import parse_invoice
+from layout_invoice import parse_layout
 
 
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434/api/chat")
@@ -44,17 +45,22 @@ INVOICE_SCHEMA = {
 
 def _decimal(value: Any) -> Decimal | None:
     try:
-        return Decimal(str(value)) if value is not None else None
+        result = Decimal(str(value)) if value is not None else None
+        return result if result is not None and result.is_finite() else None
     except (InvalidOperation, ValueError):
         return None
 
 
 def _validate(data: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    if any(not isinstance(data.get(key), dict) for key in ("supplier", "invoice", "customer", "totals")):
+        raise ValueError("Invoice sections must be objects")
     tolerance = Decimal("0.02")
     items = data.get("items") if isinstance(data.get("items"), list) else []
     item_checks = []
     amounts: list[Decimal] = []
     for index, item in enumerate(items):
+        if not isinstance(item, dict):
+            raise ValueError("Invoice items must be objects")
         qty, price, amount = (_decimal(item.get(key)) for key in ("quantity", "unit_price", "amount"))
         valid = qty is not None and price is not None and amount is not None and abs(qty * price - amount) <= tolerance
         item_checks.append({"line_no": item.get("line_no", index + 1), "valid": valid})
@@ -64,8 +70,8 @@ def _validate(data: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
     subtotal, discount, vat, net = (_decimal(totals.get(key)) for key in ("subtotal", "discount", "vat_amount", "net_amount"))
     item_sum = sum(amounts, Decimal("0"))
     subtotal_valid = bool(items) and subtotal is not None and len(amounts) == len(items) and abs(item_sum - subtotal) <= tolerance
-    vat_rate = _decimal(totals.get("vat_rate")) or Decimal("15")
-    vat_expected = (subtotal * vat_rate / 100).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) if subtotal is not None else None
+    vat_rate = _decimal(totals.get("vat_rate"))
+    vat_expected = ((subtotal - (discount or Decimal("0"))) * vat_rate / 100).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) if subtotal is not None and vat_rate is not None else None
     vat_valid = vat_expected is not None and vat is not None and abs(vat_expected - vat) <= tolerance
     net_expected = subtotal - (discount or Decimal("0")) + vat if subtotal is not None and vat is not None else None
     net_valid = net_expected is not None and net is not None and abs(net_expected - net) <= tolerance
@@ -103,21 +109,23 @@ def _compact_ocr(pages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         height_px = float(page.get("height", 1)) * float(page.get("render_dpi", 200)) / 72
         compact.append({
             "page": page.get("page"),
-            "words": [{
-                "text": word.get("text", ""),
-                "confidence": word.get("confidence", 0),
-                "x": round(float(word.get("left", 0)) / width_px, 4),
-                "y": round(float(word.get("top", 0)) / height_px, 4),
-                "w": round(float(word.get("width", 0)) / width_px, 4),
-                "h": round(float(word.get("height", 0)) / height_px, 4),
-            } for word in page.get("words", [])],
+            "boxes": [[
+                round(float(word.get("left", 0)) / width_px * 1000),
+                round(float(word.get("top", 0)) / height_px * 1000),
+                round(float(word.get("width", 0)) / width_px * 1000),
+                round(float(word.get("height", 0)) / height_px * 1000),
+                word.get("text", ""),
+            ] for word in sorted(page.get("words", []), key=lambda w: (float(w.get("top", 0)), float(w.get("left", 0))))],
         })
     return compact
 
 
 def _ask_ollama(pages: list[dict[str, Any]]) -> dict[str, Any]:
     prompt = (
-        "Extract this invoice into the required JSON schema. OCR boxes use normalized x/y/w/h coordinates. "
+        "Extract this invoice into the required JSON schema. Each OCR box is [x,y,width,height,text] on a 0-1000 page grid. "
+        "Layouts and label names vary: Buyer/Bill To/Customer are aliases; Qty/Quantity and Rate/Unit Price are aliases. "
+        "Item codes are optional; preserve every item row, decimal quantities, and full alphanumeric invoice IDs. "
+        "Distinguish pre-tax line value from line total including tax. Do not treat addresses or VAT IDs as amounts. "
         "Understand English and Arabic label aliases and table geometry. Preserve leading zeros in codes and VAT numbers. "
         "Never invent a value: return null when it is absent or uncertain. Distinguish supplier VAT from customer VAT by labels and position. "
         "Use arithmetic only to disambiguate OCR candidates, not to fabricate missing values. OCR:\n"
@@ -144,6 +152,13 @@ def _ask_ollama(pages: list[dict[str, Any]]) -> dict[str, Any]:
 
 def parse_invoice_hybrid(pages: list[dict[str, Any]], source_filename: str, language: str, mode: str = "auto") -> dict[str, Any]:
     fallback = parse_invoice(pages, source_filename, language)
+    layout = parse_layout(pages, source_filename, language)
+    if layout is not None and len(layout["items"]) >= len(fallback["data"]["items"]):
+        validation, quality = _validate(layout)
+        layout["validation"] = validation
+        quality["parser"] = "spatial_layout"
+        quality.pop("model", None)
+        fallback = {"data": layout, "quality": quality}
     if mode == "fast" or os.environ.get("USE_LOCAL_AI", "true").lower() in {"false", "0", "no"}:
         fallback["quality"]["parser"] = "spatial_fast"
         fallback["quality"]["local_ai_status"] = "disabled"
