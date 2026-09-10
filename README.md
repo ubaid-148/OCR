@@ -52,8 +52,12 @@ region. Detection is heuristic: missing fields still need the unobstructed sourc
 
 Uncertain identifiers, malformed numeric cells and mixed-script text can receive
 up to six targeted crops per page at 300 DPI using the English Paddle recognition
-model. Crop results are mapped back to the original 200 DPI coordinates. Typed
-candidates below 85% confidence are not promoted; raw alternatives remain in the
+model. Crop results are mapped back to the original 200 DPI coordinates.
+Arabic tables with merged headers can additionally receive up to eight ruled
+cell crops using Arabic recognition, even when the initial pass finds no rows.
+Header fields can be recovered independently of table detection. Responses carry
+`pipeline_version: 2026-09-arabic-grid` to identify this flow.
+Typed candidates below 85% confidence are not promoted; raw alternatives remain in the
 OCR output. Set `OCR_TARGETED_RETRY=false` to disable retries. Both recognition
 models are cached after first use. Retry failures preserve the base OCR and flag
 review, rather than dropping the invoice.

@@ -169,7 +169,7 @@ def _extract_pdf(input_path, languages, paddle_language, model):
             if os.environ.get('OCR_TARGETED_RETRY','true').lower() not in {'false','0','no'}:
                 retry_started=perf_counter()
                 try:
-                    retries=retry_regions(page,page_payload,lambda:model('en'),extract_words,temp_root)
+                    retries=retry_regions(page,page_payload,lambda lang='en':model(lang),extract_words,temp_root)
                     merge_retries(page_payload,retries)
                 except Exception as error:
                     page_payload['targeted_ocr_error']=str(error)[:500]
@@ -177,6 +177,7 @@ def _extract_pdf(input_path, languages, paddle_language, model):
             pages.append(page_payload)
             page.close()
     return {
+        "pipeline_version": "2026-09-arabic-grid",
         "engine": f"PDFium native text / PaddleOCR 3 ({paddle_language})",
         "language": languages, "pages": pages,
     }

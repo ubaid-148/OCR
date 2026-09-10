@@ -4,13 +4,19 @@ from contextlib import closing
 from pathlib import Path
 from invoice_formatter import contains, center, has_arabic
 from document_regions import invoice_words
-from layout_invoice import table, numeric
+from layout_invoice import table, numeric, header_hint, ALIASES
 
 
 def plan_regions(page):
     words,_=invoice_words(page)
     h=sorted([w.get('height',20) for w in words])[len(words)//2] if words else 20
     rows,header,_=table(words)
+    hint=header_hint(words)
+    if header is None:
+        header=hint
+    page_width=page.get('width',1)*page.get('render_dpi',200)/72
+    page_height=page.get('height',1)*page.get('render_dpi',200)/72
+    header_limit=header if header is not None else page_height*.5
     candidates=[]
     def add(w,kind,part='whole'):
         x0,y0=w['left'],w['top'];x1=x0+w['width'];y1=y0+w['height']
@@ -20,12 +26,18 @@ def plan_regions(page):
         candidates.append(dict(bbox=[x0-h*.2,y0-h*.25,x1+h*.2,y1+h*.25],kind=kind,original=w))
     for w in sorted(words,key=lambda w:(w['top'],w['left'])):
         text=w['text']
-        if header and center(w)[1]<header:
+        if center(w)[1]<header_limit:
             if (contains(text,('invoice no','invoice number','inv no','رقم الفاتورة')) or 'رقم' in text and 'فاتور' in text) and not re.search(r'\b[A-Za-z]+[-/]\d+',text):
                 add(w,'invoice_identifier','identifier')
+                # Arabic forms can place the value to the left of its label.
+                if not re.search('[A-Za-z]',text):add(w,'invoice_identifier','left')
             elif contains(text,('vat','رقم ضريبة','رقم ضريبه','الرقم الضريبي')) and not re.search(r'(?<!\d)\d{15}(?!\d)',text) and not re.search(r'%|amount|without|including',text,re.I):
                 add(w,'vat_identifier','right')
-            elif has_arabic(text) and any(t in text for t in ('شركة','مؤسسة','مؤسسه')) and len(text)>25:
+            elif any(t in text for t in ('ضربي','الضري','الضرب')) and not re.search(r'\d{15}',text):
+                add(w,'vat_identifier','whole')
+            elif 'تاريخ' in text and not re.search(r'\d{4}',text):
+                add(w,'date','whole')
+            elif has_arabic(text) and re.search('[A-Za-z]',text) and any(t in text for t in ('شركة','مؤسسة','مؤسسه')) and len(text)>25:
                 add(w,'supplier_name','left')
         if header and center(w)[1]>header and re.fullmatch(r'\d+[.]\d*[A-Za-z]',text) and numeric(text) is None:
             add(w,'numeric_cell')
@@ -35,16 +47,50 @@ def plan_regions(page):
             if has_arabic(text) and not re.search('[A-Za-z]',text) and len(text)>=8 and not re.search('[A-Za-z]',item.get('description') or ''):
                 w=next((w for w in words if [w.get(k) for k in ('left','top','width','height')]==evidence['bbox']),None)
                 if w:add(w,'description','left')
+    if not rows and hint is not None:
+        description_label=next((w for w in words if contains(w['text'],ALIASES['description']) and abs(center(w)[1]-hint)<h*2),None)
+        if description_label:
+            for w in words:
+                if hint+h*.5<center(w)[1]<hint+h*3 and abs(center(w)[0]-center(description_label)[0])<h*4 and has_arabic(w['text']) and not re.search('[A-Za-z]',w['text']) and len(w['text'])>=8:
+                    add(w,'description','left')
     # Prioritize identifiers and numeric cells before optional text improvements.
-    order={'invoice_identifier':0,'vat_identifier':1,'numeric_cell':2,'supplier_name':3,'description':4}
-    return sorted(candidates,key=lambda r:(order[r['kind']],r['bbox'][1],r['bbox'][0]))[:6]
+    order={'invoice_identifier':0,'vat_identifier':1,'date':2,'numeric_cell':3,'supplier_name':4,'description':5}
+    candidates=sorted(candidates,key=lambda r:(order[r['kind']],r['bbox'][1],r['bbox'][0]))[:6]
+    if not rows and hint is not None:
+        candidates.insert(0,dict(bbox=[0,hint-h,page_width,hint+3*h],kind='table_cells',original={}))
+    return candidates
+
+
+def grid_cells(pdf_page,region,dpi,page_width,page_height):
+    """Use visible vertical rules to re-read merged headers cell by cell."""
+    import cv2
+    import numpy as np
+    x0,y0,x1,y1=region['bbox'];y0=max(0,y0);y1=min(page_height,y1)
+    factor=300/dpi
+    crop=(0,(page_height-y1)*72/dpi,0,y0*72/dpi)
+    with closing(pdf_page.render(scale=300/72,crop=crop)) as bitmap:
+        gray=cv2.cvtColor(np.array(bitmap.to_pil().convert('RGB')),cv2.COLOR_RGB2GRAY)
+    mask=cv2.adaptiveThreshold(gray,255,cv2.ADAPTIVE_THRESH_GAUSSIAN_C,cv2.THRESH_BINARY_INV,31,10)
+    mask=cv2.dilate(mask,cv2.getStructuringElement(cv2.MORPH_RECT,(3,1)))
+    vertical=cv2.morphologyEx(mask,cv2.MORPH_OPEN,cv2.getStructuringElement(cv2.MORPH_RECT,(1,max(12,int(gray.shape[0]*.45)))))
+    indices=np.where((vertical>0).sum(axis=0)>gray.shape[0]*.4)[0].tolist()
+    groups=[]
+    for x in indices:
+        if not groups or x-groups[-1][-1]>4:groups.append([x])
+        else:groups[-1].append(x)
+    edges=[sum(g)/len(g)/factor for g in groups]
+    return [dict(kind='table_cells',bbox=[a+2,y0,b-2,y1],original={}) for a,b in zip(edges,edges[1:]) if b-a>15][:8]
 
 
 def retry_regions(pdf_page,page_payload,model,extract_words,temp_root):
     dpi=page_payload.get('render_dpi',200);scale=300/dpi
     page_width=pdf_page.get_width()*dpi/72;page_height=pdf_page.get_height()*dpi/72
     retries=[]
-    for i,region in enumerate(plan_regions(page_payload)):
+    regions=[]
+    for region in plan_regions(page_payload):
+        if region['kind']=='table_cells':regions.extend(grid_cells(pdf_page,region,dpi,page_width,page_height))
+        else:regions.append(region)
+    for i,region in enumerate(regions):
         x0,y0,x1,y1=region['bbox']
         x0=max(0,x0);y0=max(0,y0);x1=min(page_width,x1);y1=min(page_height,y1)
         if x1<=x0 or y1<=y0:continue
@@ -53,7 +99,8 @@ def retry_regions(pdf_page,page_payload,model,extract_words,temp_root):
         with closing(pdf_page.render(scale=300/72,crop=crop)) as bitmap:
             bitmap.to_pil().convert('RGB').save(path)
         found=[]
-        for result in model().predict(str(path)):
+        predictor=model('ar') if region['kind']=='table_cells' else model()
+        for result in predictor.predict(str(path)):
             for word in extract_words(result):
                 word.update(left=word['left']/scale+x0,top=word['top']/scale+y0,
                             width=word['width']/scale,height=word['height']/scale,
@@ -82,7 +129,15 @@ def merge_retries(page, retries):
                     candidates.append(word)
             elif kind=='numeric_cell' and numeric(text) is not None:
                 candidates.append(word)
-            elif kind in {'supplier_name','description'} and re.search(r'[A-Za-z]{3,}',text) and len(text)>8:
+            elif kind=='table_cells':
+                candidates.append(word)
+            elif kind=='date' and re.search(r'\d{1,2}[-/]\d{1,2}[-/]\d{4}',text):
+                date=re.search(r'\d{1,2}[-/]\d{1,2}[-/]\d{4}',text)[0]
+                time=re.search(r'\d{2}:\d{2}:\d{2}',text)
+                candidates.append(dict(word,text=date,raw_text=text,raw_time=time[0] if time else None))
+            elif kind=='description' and re.search(r'[A-Za-z]{3,}',text):
+                candidates.append(word)
+            elif kind=='supplier_name' and re.search(r'[A-Za-z]{3,}',text) and len(text)>8:
                 candidates.append(word)
         if kind in {'numeric_cell','vat_identifier','invoice_identifier'} and len(candidates)!=1:
             continue

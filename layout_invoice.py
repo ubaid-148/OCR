@@ -7,14 +7,14 @@ from invoice_formatter import DIGIT_TABLE, center, contains, has_arabic, normali
 from document_regions import invoice_words
 
 ALIASES = {
-    'description': ('item description','description','product','وصف','البيان'),
+    'description': ('item description','description','product','وصف','البيان','اسم الصنف'),
     'quantity': ('quantity','qty','الكمية','كمية'),
-    'unit_price': ('unit price','rate','price','السعر','سعر الوحدة'),
-    'amount': ('taxable value','taxable','line amount','net amount','amount','القيمة الخاضعة'),
-    'item_code': ('item code','item no','sku','product code','رمز الصنف','رقم الصنف'),
+    'unit_price': ('unit price','rate','price','السعر','سعر الوحدة','سعر افرادي','سعر أفرادي'),
+    'amount': ('taxable value','taxable','line amount','net amount','amount','القيمة الخاضعة','الاجمالي','الإجمالي'),
+    'item_code': ('item code','item no','sku','product code','رمز الصنف','رقم الصنف','كود الصنف'),
     'serial': ('s no','sn','الرقم','مسلسل'),
     'unit': ('uom','unit','الوحدة'),
-    'vat_amount': ('vat amount','tax amount','vat','الضريبة'),
+    'vat_amount': ('vat amount','tax amount','vat','الضريبة','قيمة الضريبة','قيمة الضريبية'),
     'vat_rate': ('tax rate',),
     'discount': ('discount','خصم'),
     'gross_amount': ('item subtotal','including vat'),
@@ -41,11 +41,28 @@ def geometry(words):
     return h, lambda w: center(w)[1]-slope*center(w)[0]
 
 
+def header_match(text,aliases):
+    # Keep the original evidence; separate joined Arabic headers only for matching.
+    separated=re.sub(r'(?<=\S)(الوحدة|الكمية|الضريبة)',r' \1',text)
+    return contains(separated,aliases)
+
+
 def proof(word):
     if word is None:
         return None
     return dict(page=word.get('_page',1), text=word['text'], confidence=word.get('confidence'),
                 source=word.get('source','ocr'), bbox=[word.get(k,0) for k in ('left','top','width','height')])
+
+
+def header_hint(words):
+    """Locate a likely header without requiring successfully parsed item rows."""
+    h,y=geometry(words)
+    for w in sorted(words,key=lambda w:(y(w),w.get('left',0))):
+        if contains(w['text'],ALIASES['description']):
+            peers=[p for p in words if abs(y(p)-y(w))<h*3 and
+                   any(contains(p['text'],ALIASES[k]) for k in ('item_code','quantity','amount'))]
+            if peers:return y(w)
+    return None
 
 
 def table(words):
@@ -57,7 +74,7 @@ def table(words):
         band=[w for w in words if abs(y(w)-y(q))<=3*h]
         headers={}
         for key,aliases in ALIASES.items():
-            choices=[w for w in band if contains(w['text'],aliases)]
+            choices=[w for w in band if header_match(w['text'],aliases)]
             if key=='unit':
                 choices=[w for w in choices if not contains(w['text'],ALIASES['unit_price'])]
             if key=='unit_price':
@@ -68,6 +85,7 @@ def table(words):
                 choices=[w for w in choices if not contains(w['text'],('vat amount','tax amount'))]
             headers[key]=min(choices,key=lambda w:(
                 not contains(w['text'],('taxable','القيمة الخاضعة')) if key=='amount' else False,
+                not contains(w['text'],('قيمة','amount')) if key=='vat_amount' else False,
                 not bool(re.search('[A-Za-z]',w['text'])),
                 abs(y(w)-y(q)),w['left']),default=None)
         if not all(headers[k] for k in ('description','quantity','unit_price','amount')):
@@ -94,7 +112,7 @@ def table(words):
         items=[]
         exclusive=any(contains(w['text'],('taxable','without vat','القيمة الخاضعة')) and
                       abs(center(w)[0]-hx['amount'])<h*3 for w in band)
-        gross_column=not exclusive and 'vat_amount' in hx and contains(headers['amount']['text'],('total amount',))
+        gross_column=not exclusive and 'vat_amount' in hx and contains(headers['amount']['text'],('total amount','الاجمالي','الإجمالي'))
         for i,anchor in enumerate(unique):
             row=[w for w in body if abs(y(w)-y(anchor))<h*1.15]
             def cell(key):
@@ -159,11 +177,11 @@ def parse_layout(pages,filename,language):
         pool,receipt=invoice_words(page)
         pool=[dict(w,_page=page.get('page',i+1)) for w in pool]
         if receipt: receipts.append(dict(page=page.get('page',i+1),bbox=receipt))
-        found,hy,_=table(pool);headers.append(hy)
+        found,hy,_=table(pool);headers.append(hy if hy is not None else header_hint(pool))
         for item in found:
             item['line_no']=len(items)+1;items.append(item)
         clean.append(pool)
-    if not items: return None
+    if not items and not any(h is not None for h in headers): return None
     words=clean[0];h,y=geometry(words)
     first_header=headers[0] if headers[0] is not None else float('inf')
     words=sorted([w for w in words if y(w)<first_header],key=lambda w:(y(w),w['left']))
@@ -175,7 +193,7 @@ def parse_layout(pages,filename,language):
         if label is None:return None
         candidates=[w for w in pool if w is not label and predicate(w['text']) and
                     (abs(y(w)-y(label))<=h*.95 or 0<y(w)-y(label)<=h*below and abs(w['left']-label['left'])<h*3)]
-        return min(candidates,key=lambda w:(abs(y(w)-y(label))*4+abs(w['left']-label['left']),w['text']),default=None)
+        return min(candidates,key=lambda w:(abs(y(w)-y(label))>h*.95,abs(y(w)-y(label))*4+abs(w['left']-label['left']),w['text']),default=None)
     inv=None;date=None;time=None
     for w in words:
         if w.get('retry_kind')=='invoice_identifier':
@@ -187,6 +205,10 @@ def parse_layout(pages,filename,language):
             if value: inv=keep('invoice.invoice_number',value,normalize(value['text']));break
     pattern=r'\b(?:\d{1,2}[-/]\d{1,2}[-/]20\d{2}|20\d{2}[-/]\d{1,2}[-/]\d{1,2})\b'
     for w in words:
+        if w.get('retry_kind')=='date':
+            date=keep('invoice.date',w,w['text'])
+            time=w.get('raw_time')
+            break
         if contains(w['text'],('date','dated','التاريخ')) and not contains(w['text'],('due','delivery','استحقاق')):
             target=w if re.search(pattern,normalize(w['text'])) else near(w,lambda s:re.search(pattern,normalize(s)))
             if target:
@@ -195,9 +217,9 @@ def parse_layout(pages,filename,language):
                 if match:time=keep('invoice.time',target,match[0])
                 break
     buyer=next((w for w in words if contains(w['text'],('buyer','bill to','customer','المشتري','العميل','السادة'))
-                and not contains(w['text'],('signature','seal','customer no','ختم','توقيع'))),None)
+                and not contains(w['text'],('signature','seal','customer no','company','trading','est','establishment','ختم','توقيع'))),None)
     def name_text(s):
-        return len(s)>8 and not contains(s,('invoice','date','vat','building','street','mobile','postal','number','email','رقم','التاريخ','عنوان'))
+        return len(s)>8 and not contains(s,('invoice','date','vat','building no','street','mobile','postal','number','email','رقم','التاريخ','عنوان'))
     buyer_name=None
     if buyer:
         explicit=next((w for w in words if y(buyer)<y(w)<first_header and re.match(r'(?i)^name\s*:',w['text'])),None)
@@ -210,8 +232,11 @@ def parse_layout(pages,filename,language):
     header=[w for w in words if (not buyer or y(w)<y(buyer)) and name_text(w['text']) and
             not contains(w['text'],('for industrial','للمواد','للتجارة في','since'))]
     def company(arabic):
-        candidates=[w for w in header if has_arabic(w['text'])==arabic and
-                    contains(w['text'],('شركة','مؤسسة','مؤسسه','company','trading','est','establishment','trad','materials'))]
+        def is_arabic(s):
+            return len(re.findall(r'[\u0600-\u06ff]',s))>len(re.findall('[A-Za-z]',s))
+        candidates=[w for w in header if is_arabic(w['text'])==arabic and
+                    (contains(w['text'],('شركة','مؤسسة','مؤسسه','company','trading','est','establishment','trad','materials','building')) or
+                     not arabic and len(re.findall('[A-Z]',w['text']))>15)]
         w=min(candidates,key=lambda w:(y(w),-w['width']),default=None)
         return keep('supplier.name_ar' if arabic else 'supplier.name_en',w)
     name_ar,name_en=company(True),company(False)
@@ -226,21 +251,22 @@ def parse_layout(pages,filename,language):
         for label in sorted(footer,key=lambda w:(fy(w),w['left']),reverse=True):
             if not contains(label['text'],aliases):continue
             if path=='totals.subtotal' and contains(label['text'],('amount due','net','grand')):continue
+            if path=='totals.subtotal' and contains(label['text'],('total vat','vat amount','tax amount','المجموع الضريبة')):continue
             candidates=[w for w in footer if w is not label and numeric(w['text']) is not None and abs(fy(w)-fy(label))<=fh*1.2]
             value=min(candidates,key=lambda w:(abs(fy(w)-fy(label)),abs(center(w)[0]-center(label)[0])),default=None)
             if value:return keep(path,value,numeric(value['text']))
         return None
-    subtotal=total('totals.subtotal',('subtotal','gross amount','total amount','total excluding vat','taxable total','taxable value','القيمة الخاضعة'))
-    vat=total('totals.vat_amount',('total vat','vat amount','tax amount','ضريبة القيمة','ضريية القيمة'))
-    net=total('totals.net_amount',('grand total','invoice total','amount due','net amount','net total','المبلغ المستحق','إجمالي الفاتورة'))
+    subtotal=total('totals.subtotal',('subtotal','gross amount','total amount','total excluding vat','taxable total','taxable value','القيمة الخاضعة','المجموع','الجموع'))
+    vat=total('totals.vat_amount',('total vat','vat amount','tax amount','ضريبة القيمة','ضريية القيمة','الضريبة','الضرية'))
+    net=total('totals.net_amount',('grand total','invoice total','amount due','net amount','net total','المبلغ المستحق','إجمالي الفاتورة','الإجمالي شامل'))
     rates=[(w,float(m[1])) for w in clean[-1] for m in re.finditer(r'(\d+(?:\.\d+)?)\s*%',normalize(w['text'])) if contains(w['text'],('vat','tax')) or re.fullmatch(r'\s*\d+(?:\.\d+)?\s*%\s*',normalize(w['text']))]
     rate=keep('totals.vat_rate',rates[0][0],rates[0][1]) if rates and len({v for _,v in rates})==1 else None
     text=' '.join(w['text'] for w in clean[-1])
     currency=next((c for c in ('SAR','USD','AED','EUR','GBP','PKR') if re.search(r'\b'+c+r'\b',text)),None)
-    if currency is None and re.search(r'Saudi\s*Riyal|ريال سعودي',text,re.I):currency='SAR'
+    if currency is None and re.search(r'Saudi\s*Riyal|ر?يال\s+سعودي',text,re.I):currency='SAR'
     return dict(document_type='invoice',document_language=language.split('+'),source_filename=filename,
                 supplier=dict(name_ar=name_ar,name_en=name_en,vat_number=supplier_vat),
                 invoice=dict(invoice_number=inv,date=date,hijri_date=None,time=time,payment_method=payment),
                 customer=dict(name=customer_name,vat_number=customer_vat,address=None),items=items,
-                totals=dict(subtotal=subtotal,discount=total('totals.discount',('discount','discounts','dscounts','خصم','الخصومات')),vat_rate=rate,vat_amount=vat,net_amount=net,currency=currency),
+                totals=dict(subtotal=subtotal,discount=total('totals.discount',('discount','discounts','dscounts','خصم','الخصومات','الحسم')),vat_rate=rate,vat_amount=vat,net_amount=net,currency=currency),
                 field_evidence=evidence,receipt_regions=receipts)

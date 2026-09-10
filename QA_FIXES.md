@@ -16,9 +16,26 @@ that derivation. Source rounding differences remain visible and require review.
 Balanced mode avoids AI calls when the outstanding work is source/spelling review
 and the financial checks pass. It still uses AI for unresolved parsing problems.
 
+## Arabic table follow-up (9609)
+
+The supplied Colab result missed identifiers and all items because merged Arabic
+headers prevented table detection and also blocked retries. Header recovery now
+works independently, with up to eight additional ruled-cell Arabic crops alongside
+the six targeted English crops. Same-row customer values take precedence over
+nearby labels; Arabic footer labels and numeric-only invoice numbers are supported.
+The response identifies this revision as `2026-09-arabic-grid`.
+
+The original 9609 PDF was rerun through full-page OCR and targeted crops on CPU.
+Fast and Balanced modes recovered invoice 236863, date 25/05/2026, both VAT
+identifiers, customer, item 040814, quantity 1, price/subtotal 17.39, VAT 2.61
+and total 20.00 SAR. Bilingual name/description spelling still requires review.
+The previous 57 selected checks also passed in both modes when replaying their
+saved OCR evidence through this parser. These follow-up checks are not new
+full-page OCR runs of 9605–9607.
+
 ## Validation
 
-- 35 regression tests passed, including native PDF extraction and synthetic
+- 39 regression tests passed, including native PDF extraction and synthetic
   receipt, serial/code, tax-inclusive, numeric corruption and retry cases.
 - All three supplied single-page scans were run through full-page OCR and the
   updated parser. The final tighter invoice-number crop was additionally rerun
