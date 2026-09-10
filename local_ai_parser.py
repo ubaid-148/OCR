@@ -8,9 +8,10 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any
 
 from invoice_formatter import parse_invoice
-from layout_invoice import parse_layout
+from layout_invoice import parse_layout, table
 from invoice_evidence import audit_ai
 from ollama_http import request_json
+from document_regions import invoice_words
 
 
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434/api/chat")
@@ -33,7 +34,9 @@ INVOICE_SCHEMA = {
         "items": {"type": "array", "items": {"type": "object", "properties": {
             "line_no": {"type": "integer"}, "item_code": {"type": ["string", "null"]},
             "description": {"type": ["string", "null"]}, "quantity": {"type": ["number", "null"]},
-            "unit_price": {"type": ["number", "null"]}, "amount": {"type": ["number", "null"]}},
+            "unit_price": {"type": ["number", "null"]}, "amount": {"type": ["number", "null"]},
+            "vat_amount": {"type": ["number", "null"]}, "discount": {"type": ["number", "null"]},
+            "gross_amount": {"type": ["number", "null"]}},
             "required": ["line_no", "item_code", "description", "quantity", "unit_price", "amount"]}},
         "totals": {"type": "object", "properties": {
             "subtotal": {"type": ["number", "null"]}, "discount": {"type": ["number", "null"]},
@@ -64,7 +67,11 @@ def _validate(data: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
         if not isinstance(item, dict):
             raise ValueError("Invoice items must be objects")
         qty, price, amount = (_decimal(item.get(key)) for key in ("quantity", "unit_price", "amount"))
-        valid = qty is not None and price is not None and amount is not None and abs(qty * price - amount) <= tolerance
+        line_discount = _decimal(item.get('discount')) or Decimal('0')
+        valid = qty is not None and price is not None and amount is not None and abs(qty * price - line_discount - amount) <= tolerance
+        gross, line_vat = _decimal(item.get('gross_amount')), _decimal(item.get('vat_amount'))
+        if gross is not None and line_vat is not None and amount is not None:
+            valid = valid and abs(amount + line_vat - gross) <= tolerance
         item_checks.append({"line_no": item.get("line_no", index + 1), "valid": valid})
         if amount is not None:
             amounts.append(amount)
@@ -84,6 +91,9 @@ def _validate(data: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
         "vat_expected": float(vat_expected) if vat_expected is not None else None, "vat_valid": vat_valid,
         "net_expected": float(net_expected) if net_expected is not None else None, "net_amount_valid": net_valid,
     }
+    line_taxes = [_decimal(item.get('vat_amount')) for item in items]
+    tax_rounding_issue = bool(items) and all(v is not None for v in line_taxes) and vat is not None and abs(sum(line_taxes, Decimal('0'))-vat)>Decimal('.005')
+    validation['line_vat_sum_matches'] = not tax_rounding_issue if items and all(v is not None for v in line_taxes) and vat is not None else None
     required = {
         "supplier.name": data["supplier"].get("name_ar") or data["supplier"].get("name_en"),
         "supplier.vat_number": data.get("supplier", {}).get("vat_number"),
@@ -100,9 +110,9 @@ def _validate(data: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
             if item.get(key) in (None, ""):
                 missing.append(f"items[{index}].{key}")
     calculations_valid = all((validation["items_calculation_valid"], subtotal_valid, vat_valid, net_valid))
-    needs_review = bool(missing or not calculations_valid)
+    needs_review = bool(missing or not calculations_valid or tax_rounding_issue)
     quality = {
-        "overall_status": "verified" if not needs_review else "needs_review",
+        "overall_status": "checks_passed" if not needs_review else "needs_review",
         "needs_review": needs_review, "missing_fields": missing,
         "low_confidence_fields": [], "parser": "local_ai",
         "model": OLLAMA_MODEL,
@@ -171,8 +181,9 @@ def _result_score(result):
             -len(quality.get("evidence_issues", [])))
 
 
-def parse_invoice_hybrid(pages: list[dict[str, Any]], source_filename: str, language: str, mode: str = "auto") -> dict[str, Any]:
-    fallback = parse_invoice(pages, source_filename, language)
+def _parse_invoice_hybrid(pages: list[dict[str, Any]], source_filename: str, language: str, mode: str = "auto") -> dict[str, Any]:
+    # Legacy geometry is single-page only; never mix coordinates across pages.
+    fallback = parse_invoice(pages[:1], source_filename, language)
     checks, quality = _validate(fallback["data"])
     quality["low_confidence_fields"] = fallback["quality"].get("low_confidence_fields", [])
     if quality["low_confidence_fields"]:
@@ -181,13 +192,43 @@ def parse_invoice_hybrid(pages: list[dict[str, Any]], source_filename: str, lang
     quality.pop("model", None)
     fallback["data"]["validation"] = checks
     fallback["quality"] = quality
+    if len(pages) > 1:
+        quality.update(needs_review=True, overall_status="needs_review")
+        quality["missing_fields"].append("document.remaining_pages")
     layout = parse_layout(pages, source_filename, language)
     if layout is not None and len(layout["items"]) >= len(fallback["data"]["items"]):
         validation, quality = _validate(layout)
         layout["validation"] = validation
         quality["parser"] = "spatial_layout"
         quality.pop("model", None)
-        fallback = {"data": layout, "quality": quality}
+        evidence = dict(layout.get('field_evidence', {}))
+        for i,item in enumerate(layout['items']):
+            for key,value in item.get('field_evidence',{}).items():
+                evidence[f'items[{i}].{key}']=value
+        # Layout evidence is the actual selected box, not an occurrence elsewhere.
+        issues=[]
+        if not evidence:
+            issues,evidence=audit_ai(layout,pages)
+        validation, quality = _validate(layout)
+        layout["validation"] = validation
+        quality.update(parser="spatial_layout", evidence_issues=issues, field_evidence=evidence)
+        quality.pop("model", None)
+        if issues:
+            quality.update(needs_review=True, overall_status="needs_review")
+        low = [dict(field=key,**ev) for key,value in evidence.items()
+               for ev in (value if isinstance(value,list) else [value])
+               if ev.get('source')!='native_text' and float(ev.get('confidence') or 0)<80]
+        quality["low_confidence_fields"] = low
+        if low:
+            quality.update(needs_review=True, overall_status="needs_review")
+        uncovered = [p.get("page", i+1) for i, p in enumerate(pages)
+                     if len(pages) > 1 and not table(p.get("words", []))[0]]
+        if uncovered:
+            quality.update(needs_review=True, overall_status="needs_review")
+            quality["unresolved_pages"] = uncovered
+        candidate = {"data": layout, "quality": quality}
+        if _result_score(candidate) >= _result_score(fallback):
+            fallback = candidate
     if mode == "fast" or os.environ.get("USE_LOCAL_AI", "true").lower() in {"false", "0", "no"}:
         fallback["quality"]["parser"] = "spatial_fast"
         fallback["quality"]["local_ai_status"] = "disabled"
@@ -198,9 +239,19 @@ def parse_invoice_hybrid(pages: list[dict[str, Any]], source_filename: str, lang
                 "Compare raw_ocr pages with the source PDF before using these values."
             )
         return fallback
+
+    financial_checks=fallback['data'].get('validation',{})
+    if any(p.get('receipt_region') for p in pages) and all(financial_checks.get(k) for k in ('items_calculation_valid','subtotal_valid','vat_valid','net_amount_valid')):
+        fallback['quality']['local_ai_status']='skipped_source_review'
+        return fallback
+    spelling_review=any(a['kind'] in {'supplier_name','description'} for p in pages for a in p.get('targeted_ocr',{}).get('accepted',[]))
+    critical_missing=[f for f in fallback['quality'].get('missing_fields',[]) if f not in {'supplier.name','customer.name'} and not f.endswith('.description')]
+    if spelling_review and not critical_missing and all(financial_checks.get(k) for k in ('items_calculation_valid','subtotal_valid','vat_valid','net_amount_valid')):
+        fallback['quality']['local_ai_status']='skipped_source_review'
+        return fallback
     if not fallback["quality"]["needs_review"] and fallback["data"]["invoice"].get("date"):
-        fallback["quality"]["parser"] = "spatial_verified"
-        fallback["quality"]["local_ai_status"] = "skipped_verified"
+        fallback["quality"]["parser"] = "spatial_checks_passed"
+        fallback["quality"]["local_ai_status"] = "skipped_checks_passed"
         return fallback
     try:
         data = _ask_ollama(pages)
@@ -234,3 +285,29 @@ def parse_invoice_hybrid(pages: list[dict[str, Any]], source_filename: str, lang
         fallback["quality"]["local_ai_status"] = "failed"
         fallback["quality"]["local_ai_error"] = str(error)[:2000]
         return fallback
+
+
+def parse_invoice_hybrid(pages, source_filename, language, mode='auto'):
+    clean=[];receipts=[]
+    for i,page in enumerate(pages):
+        words,region=invoice_words(page)
+        clean.append(dict(page,words=words,receipt_region=region))
+        if region:receipts.append(dict(page=page.get('page',i+1),bbox=region))
+    result=_parse_invoice_hybrid(clean,source_filename,language,mode)
+    for item in result['data'].get('items',[]):
+        for key in ('vat_amount','discount','gross_amount','amount_source'):
+            item.setdefault(key,None)
+        item.setdefault('field_evidence',{})
+    quality=result['quality']
+    if receipts:
+        quality.update(needs_review=True,overall_status='needs_review',receipt_regions=receipts)
+        quality.setdefault('review_reasons',[]).append('Payment receipt detected; its text is excluded. Missing header fields may be covered and require the unobstructed invoice.')
+    if result['data'].get('validation',{}).get('line_vat_sum_matches') is False:
+        quality.setdefault('review_reasons',[]).append('Printed line VAT sum differs from document VAT; source amounts are preserved.')
+    if any(page.get('targeted_ocr_error') for page in pages):
+        quality.update(needs_review=True,overall_status='needs_review')
+        quality['targeted_ocr_errors']=[page['targeted_ocr_error'] for page in pages if page.get('targeted_ocr_error')]
+    if any(a['kind'] in {'supplier_name','description'} for page in pages for a in page.get('targeted_ocr',{}).get('accepted',[])):
+        quality.update(needs_review=True,overall_status='needs_review')
+        quality.setdefault('review_reasons',[]).append('Check supplier/description spelling recovered by targeted OCR against the source.')
+    return result

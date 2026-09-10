@@ -15,6 +15,10 @@ os.environ.setdefault("FLAGS_use_mkldnn", "0")
 import pypdfium2 as pdfium
 import paddle
 from paddleocr import PaddleOCR
+from native_pdf import extract_native_words
+from targeted_ocr import retry_regions, merge_retries
+from document_regions import receipt_region
+from pdf_errors import InvalidPDFError
 
 
 LANGUAGE_MAP = {
@@ -104,24 +108,47 @@ def extract_pdf(input_path: Path, languages: str) -> dict[str, object]:
     with _OCR_LOCK:
         acquired = perf_counter()
         paddle_language = LANGUAGE_MAP.get(languages, "ar")
-        ocr = _get_model(paddle_language)
-        loaded = perf_counter()
-        payload = _extract_pdf(input_path, languages, paddle_language, ocr)
-        payload["device"] = get_ocr_device()
+        load_seconds = 0.0
+        def model(language=None):
+            nonlocal load_seconds
+            start = perf_counter()
+            result = _get_model(language or paddle_language)
+            load_seconds += perf_counter() - start
+            return result
+        payload = _extract_pdf(input_path, languages, paddle_language, model)
+        payload["device"] = get_ocr_device() if any(p["extraction_method"] == "ocr" for p in payload["pages"]) else "not_used"
         payload["timings_seconds"] = {
             "queue": round(acquired - started, 3),
-            "model_load": round(loaded - acquired, 3),
-            "render_and_ocr": round(perf_counter() - loaded, 3),
+            "model_load": round(load_seconds, 3),
+            "render_and_ocr": round(perf_counter() - acquired - load_seconds, 3),
         }
         return payload
 
 
-def _extract_pdf(input_path, languages, paddle_language, ocr):
+def _extract_pdf(input_path, languages, paddle_language, model):
     pages = []
     render_dpi = 200
-    with pdfium.PdfDocument(str(input_path)) as document, tempfile.TemporaryDirectory(prefix="paddle-ocr-") as temp_dir:
+    try:
+        document=pdfium.PdfDocument(str(input_path))
+    except Exception as error:
+        raise InvalidPDFError('PDF is corrupt, encrypted, or unsupported.') from error
+    if len(document)==0:
+        document.close()
+        raise InvalidPDFError('PDF contains no pages.')
+    with document, tempfile.TemporaryDirectory(prefix="paddle-ocr-") as temp_dir:
         temp_root = Path(temp_dir)
         for number, page in enumerate(document, start=1):
+            try:
+                native = extract_native_words(page) if os.environ.get("OCR_FORCE_RASTER", "false").lower() not in {"true", "1"} else []
+            except Exception:
+                native = []  # Unusable text layer: rasterize this page.
+            if native:
+                pages.append(dict(page=number, render_dpi=render_dpi,
+                                  width=page.get_width(), height=page.get_height(),
+                                  extraction_method="native_text", words=native,
+                                  text="\n".join(w["text"] for w in native)))
+                page.close()
+                continue
             image_path = temp_root / f"page-{number}.png"
             bitmap = page.render(scale=render_dpi / 72)
             try:
@@ -129,17 +156,28 @@ def _extract_pdf(input_path, languages, paddle_language, ocr):
             finally:
                 bitmap.close()
             words = []
-            for prediction in ocr.predict(str(image_path)):
+            for prediction in model().predict(str(image_path)):
                 words.extend(extract_words(prediction))
-            pages.append({
+            page_payload = {
                 "page": number, "render_dpi": render_dpi,
+                "extraction_method": "ocr",
                 "width": page.get_width(), "height": page.get_height(),
                 "words": words,
                 "text": "\n".join(item["text"] for item in words),
-            })
+            }
+            page_payload['receipt_region']=receipt_region(words,page.get_width()*render_dpi/72,page.get_height()*render_dpi/72)
+            if os.environ.get('OCR_TARGETED_RETRY','true').lower() not in {'false','0','no'}:
+                retry_started=perf_counter()
+                try:
+                    retries=retry_regions(page,page_payload,lambda:model('en'),extract_words,temp_root)
+                    merge_retries(page_payload,retries)
+                except Exception as error:
+                    page_payload['targeted_ocr_error']=str(error)[:500]
+                page_payload['targeted_ocr_seconds']=round(perf_counter()-retry_started,3)
+            pages.append(page_payload)
             page.close()
     return {
-        "engine": f"PaddleOCR 3 ({paddle_language})",
+        "engine": f"PDFium native text / PaddleOCR 3 ({paddle_language})",
         "language": languages, "pages": pages,
     }
 

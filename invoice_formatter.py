@@ -87,7 +87,7 @@ def nearest_value(
 
 
 def field_confidence(word: dict[str, Any] | None) -> float | None:
-    return round(float(word.get("confidence", 0)), 2) if word else None
+    return round(float(word.get("confidence") or 0), 2) if word else None
 
 
 def as_float(value: Decimal | None) -> float | None:
@@ -272,7 +272,7 @@ def parse_invoice(pages: list[dict[str, Any]], source_filename: str, language: s
     }
     low_confidence = [
         {"field": field, "confidence": field_confidence(word), "reason": "OCR confidence is below 80%"}
-        for field, word in tracked.items() if word is not None and field_confidence(word) < 80
+        for field, word in tracked.items() if word is not None and word.get("source") != "native_text" and field_confidence(word) < 80
     ]
     missing = [field for field, word in tracked.items() if word is None]
     if not items:
@@ -281,6 +281,9 @@ def parse_invoice(pages: list[dict[str, Any]], source_filename: str, language: s
         missing.append("invoice.date")
     needs_review = bool(low_confidence or missing or not all((items_valid, subtotal_valid, vat_valid, net_valid)))
 
+    rates = {float(m[1]) for word in words if (m := re.fullmatch(r"\s*(\d+(?:\.\d+)?)\s*%\s*", normalize(word.get("text", ""))))}
+    text = " ".join(word.get("text", "") for word in words)
+    currency = next((c for c in ("SAR", "USD", "AED", "EUR", "GBP", "PKR") if re.search(r"\b" + c + r"\b", text)), None)
     return {
         "data": {
             "document_type": "invoice",
@@ -303,8 +306,8 @@ def parse_invoice(pages: list[dict[str, Any]], source_filename: str, language: s
             "items": items,
             "totals": {
                 "subtotal": as_float(subtotal), "discount": as_float(discount),
-                "vat_rate": 15.0, "vat_amount": as_float(vat_amount),
-                "net_amount": as_float(net_amount), "currency": "SAR",
+                "vat_rate": next(iter(rates)) if len(rates) == 1 else None, "vat_amount": as_float(vat_amount),
+                "net_amount": as_float(net_amount), "currency": currency,
             },
             "validation": {
                 "items_calculation_valid": items_valid,

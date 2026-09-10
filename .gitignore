@@ -8,3 +8,4 @@ uploads/*
 !uploads/.gitkeep
 *.log
 .env
+qa_samples/

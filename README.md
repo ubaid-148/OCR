@@ -45,11 +45,60 @@ Open <http://127.0.0.1:8765> and upload a PDF invoice.
 
 ## Flow
 
-1. `ocr_web.py` receives and validates the PDF upload.
-2. `coordinate_ocr.py` renders pages and extracts text with bounding boxes.
-3. `local_ai_parser.py` asks local Ollama for schema-valid invoice JSON.
-4. `invoice_formatter.py` provides deterministic spatial parsing and validation.
-5. Temporary files are removed after each request.
+The September sample fixes add skew-aware table rows, bounded column matching
+(including serial numbers versus item codes), broader footer labels and payment
+receipt isolation. Invoice fields never use text inside the detected receipt
+region. Detection is heuristic: missing fields still need the unobstructed source.
+
+Uncertain identifiers, malformed numeric cells and mixed-script text can receive
+up to six targeted crops per page at 300 DPI using the English Paddle recognition
+model. Crop results are mapped back to the original 200 DPI coordinates. Typed
+candidates below 85% confidence are not promoted; raw alternatives remain in the
+OCR output. Set `OCR_TARGETED_RETRY=false` to disable retries. Both recognition
+models are cached after first use. Retry failures preserve the base OCR and flag
+review, rather than dropping the invoice.
+
+Items additionally expose `vat_amount`, `discount`, `gross_amount`,
+`amount_source` and `field_evidence`. A missing pre-tax line amount is derived
+only when quantity/price and the printed VAT/gross reconcile, and is marked
+`derived_quantity_price`. Printed values are retained. A line/document VAT
+rounding discrepancy triggers review. Field confidence uses selected evidence
+instead of unrelated footer noise. Balanced mode skips AI for receipt-bearing
+invoices whose financial checks pass, since AI cannot uncover hidden headers.
+
+Tests and QA do not establish 100% accuracy. Names/descriptions recovered by
+targeted OCR still require spelling review. The three real sample PDFs and their
+raw QA outputs stay local under ignored `qa_samples/`; synthetic regressions are
+committed. Colab cell 1 downloads this repository's `main`, so rerun the notebook
+from cell 1 after an update; an existing running server retains its old imports.
+
+1. `ocr_web.py` receives the PDF upload.
+2. `native_pdf.py` checks each page for usable positioned text. Unrotated,
+   uncropped pages without images and with sufficient readable text can bypass OCR.
+   Image-bearing, rotated, sparse or invalid-text pages use PaddleOCR at 200 DPI.
+3. Paddle models load only when a page needs OCR, and remain cached across uploads.
+4. The hybrid parser compares spatial candidates using completeness, calculations
+   and evidence. Legacy geometry only receives page one; unresolved later pages
+   require review. Layout output receives numeric evidence and confidence checks.
+5. Balanced mode asks Ollama when review is needed; Fast mode returns the spatial
+   result with review information. Arithmetic passing is called `checks_passed`,
+   not proof that every field matches the original document.
+6. JSON includes `schema_version`, `status`, and per-page `extraction_methods`.
+   Existing `data`, `quality`, timings and review OCR remain available. Upload and
+   processing failures return JSON with an error code and message.
+7. Temporary files are removed after each request.
+
+Set `OCR_FORCE_RASTER=true` to bypass native extraction for comparison or PDFs
+with suspect text layers. Native boxes use the same 200 DPI coordinate system,
+with `source=native_text` and `confidence=null` (no OCR confidence is invented).
+The native-text heuristic cannot establish semantic correctness. Pages containing
+logos also conservatively use OCR. No source-PDF accuracy or Colab latency claim
+has been measured for this change. Continuation pages without table headers still
+need AI/manual review; automatic header propagation and AI chunking are pending.
+
+Run all regressions with `python -m unittest discover -v`; the native PDF fixture
+test requires pypdfium2. Local validation passed 28 tests including a generated
+PDF with real PDFium extraction and rotated-page fallback.
 
 ## Processing speed
 

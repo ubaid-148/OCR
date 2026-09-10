@@ -16,6 +16,7 @@ from pathlib import Path
 from urllib.parse import parse_qs
 
 from local_ai_parser import parse_invoice_hybrid
+from pdf_errors import InvalidPDFError
 
 
 ROOT = Path(__file__).resolve().parent
@@ -97,6 +98,18 @@ button:hover {{ background:#0f4b3d; }}
 
 
 class Handler(BaseHTTPRequestHandler):
+    def send_json(self, payload, status=200):
+        data = json.dumps(payload, ensure_ascii=False, allow_nan=False).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def send_failure(self, message, status):
+        self.send_json({"schema_version": "1.0", "status": "error", "data": None,
+                        "error": {"code": status, "message": message}}, status)
+
     def send_html(self, body: bytes, status: int = 200) -> None:
         self.send_response(status)
         self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -111,9 +124,17 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(404)
 
     def do_POST(self) -> None:
-        length = int(self.headers.get("Content-Length", "0"))
+        if self.path != '/':
+            self.send_failure('Unknown endpoint.', 404)
+            return
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            self.send_json({"schema_version": "1.0", "status": "error", "data": None,
+                            "error": {"code": 400, "message": "Invalid Content-Length"}}, 400)
+            return
         if length <= 0 or length > MAX_UPLOAD_BYTES:
-            self.send_html(page("Please upload a PDF smaller than 100 MB."), 413)
+            self.send_failure("Please upload a PDF smaller than 100 MB.", 413)
             return
 
         body = self.rfile.read(length)
@@ -127,7 +148,7 @@ class Handler(BaseHTTPRequestHandler):
         mode_part = next((part for part in message.iter_attachments() if part.get_param("name", header="content-disposition") == "mode"), None)
         mode = "fast" if mode_part and mode_part.get_content().strip() == "fast" else "auto"
         if pdf_part is None:
-            self.send_html(page("No PDF was received."), 400)
+            self.send_failure("No PDF was received.", 400)
             return
 
         languages = (language_part.get_content() if language_part else "eng+ara").strip()
@@ -138,7 +159,7 @@ class Handler(BaseHTTPRequestHandler):
             languages = "eng+ara"
         filename = Path(pdf_part.get_filename() or "input.pdf").name
         if Path(filename).suffix.lower() != ".pdf":
-            self.send_html(page("Only PDF files are supported."), 400)
+            self.send_failure("Only PDF files are supported.", 400)
             return
 
         job_id = uuid.uuid4().hex
@@ -146,7 +167,11 @@ class Handler(BaseHTTPRequestHandler):
         output_path = UPLOAD_DIR / f"{job_id}-searchable.pdf"
         sidecar_path = UPLOAD_DIR / f"{job_id}-ocr.txt"
         coordinate_path = UPLOAD_DIR / f"{job_id}-coordinates.json"
-        input_path.write_bytes(pdf_part.get_payload(decode=True) or b"")
+        pdf_bytes=pdf_part.get_payload(decode=True) or b''
+        if not pdf_bytes.startswith(b'%PDF-'):
+            self.send_failure('The uploaded file is not a PDF.',400)
+            return
+        input_path.write_bytes(pdf_bytes)
         env = os.environ.copy()
         env["TESSDATA_PREFIX"] = str(ROOT / "tessdata")
         env["Path"] = env.get("Path", "") + os.pathsep + r"C:\Program Files\Tesseract-OCR"
@@ -169,7 +194,7 @@ class Handler(BaseHTTPRequestHandler):
                     )
                     if coordinate_result.returncode != 0 or not coordinate_path.exists():
                         detail = (coordinate_result.stderr or coordinate_result.stdout or "Coordinate OCR failed").strip()
-                        self.send_html(page(f"OCR failed:\n{detail}"), 500)
+                        self.send_failure(f"OCR failed:\n{detail}", 500)
                         return
                     coordinate_payload = json.loads(coordinate_path.read_text(encoding="utf-8"))
                 else:
@@ -197,19 +222,15 @@ class Handler(BaseHTTPRequestHandler):
                     "total": round(perf_counter() - started, 3),
                 }
                 payload["ocr_device"] = coordinate_payload.get("device", "unknown")
-                data = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json; charset=utf-8")
-                suffix = "invoice" if output_format == "invoice" else "ocr"
-                self.send_header("Content-Disposition", f'inline; filename="{Path(filename).stem}-{suffix}.json"')
-                self.send_header("Content-Length", str(len(data)))
-                self.end_headers()
-                self.wfile.write(data)
+                payload["schema_version"] = "1.0"
+                payload["status"] = payload.get("quality", {}).get("overall_status", "extracted")
+                payload["extraction_methods"] = [p.get("extraction_method", "ocr") for p in coordinate_payload["pages"]]
+                self.send_json(payload)
                 return
             result = subprocess.run(command, env=env, capture_output=True, text=True, timeout=1800)
             if result.returncode != 0 or not output_path.exists():
                 detail = (result.stderr or result.stdout or "OCR failed").strip()
-                self.send_html(page(f"OCR failed:\n{detail}"), 500)
+                self.send_failure(f"OCR failed:\n{detail}", 500)
                 return
             if output_format in {"json", "invoice"}:
                 raw_text = sidecar_path.read_text(encoding="utf-8", errors="replace")
@@ -243,11 +264,13 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()
             self.wfile.write(data)
+        except InvalidPDFError as error:
+            self.send_failure(str(error),400)
         except subprocess.TimeoutExpired:
-            self.send_html(page("OCR timed out after 30 minutes."), 504)
+            self.send_failure("OCR timed out after 30 minutes.", 504)
         except Exception as error:
             self.log_message("OCR failed: %s", error)
-            self.send_html(page(f"OCR failed: {error}"), 500)
+            self.send_failure(f"OCR failed: {error}", 500)
         finally:
             for path in (input_path, output_path, sidecar_path, coordinate_path):
                 try:

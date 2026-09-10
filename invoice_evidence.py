@@ -46,10 +46,12 @@ def audit_ai(data, pages):
             container[key] = None
             issues.append({"field": path, "reason": "AI value was not found in the OCR evidence"})
             return
-        page, word = max(matches, key=lambda pair: float(pair[1].get("confidence", 0)))
-        confidence = float(word.get("confidence", 0))
-        evidence[path] = dict(page=page, text=word.get("text", ""), confidence=confidence)
-        if confidence < 80:
+        page, word = max(matches, key=lambda pair: float(pair[1].get("confidence") or 0))
+        confidence = word.get("confidence")
+        evidence[path] = dict(page=page, text=word.get("text", ""), confidence=confidence,
+                              source=word.get("source", "ocr"),
+                              bbox=[word.get(k) for k in ("left", "top", "width", "height")])
+        if word.get("source") != "native_text" and float(confidence or 0) < 80:
             issues.append({"field": path, "reason": "Supporting OCR confidence is below 80%", "confidence": confidence})
 
     for section, key in (("supplier", "vat_number"), ("customer", "vat_number"), ("invoice", "invoice_number")):
@@ -63,7 +65,7 @@ def audit_ai(data, pages):
                for t in re.findall(r"\b(?:\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[-/]\d{1,2}[-/]\d{4})\b", normalized(w.get("text", ""))))]
     check(data["invoice"], "date", "invoice.date", matches)
     containers = [("totals", data["totals"], ("subtotal", "discount", "vat_rate", "vat_amount", "net_amount"))]
-    containers += [(f"items[{i}]", item, ("quantity", "unit_price", "amount")) for i,item in enumerate(data.get("items", []))]
+    containers += [(f"items[{i}]", item, ("quantity", "unit_price", "amount", "vat_amount", "discount", "gross_amount")) for i,item in enumerate(data.get("items", []))]
     for prefix, container, keys in containers:
         for key in keys:
             value = container.get(key)
