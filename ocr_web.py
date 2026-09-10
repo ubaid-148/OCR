@@ -17,6 +17,7 @@ from urllib.parse import parse_qs
 
 from local_ai_parser import parse_invoice_hybrid
 from pdf_errors import InvalidPDFError
+from invoice_response import clean_invoice_response
 
 
 ROOT = Path(__file__).resolve().parent
@@ -91,7 +92,7 @@ button:hover {{ background:#0f4b3d; }}
 <label>PDF file<input type="file" name="pdf" accept="application/pdf,.pdf" required></label>
 <label>Languages<select name="languages"><option value="eng+ara">English + Arabic</option><option value="eng">English only</option><option value="ara">Arabic only</option><option value="eng+urd">English + Urdu</option></select></label>
 <label>Processing<select name="mode"><option value="auto">Balanced (AI only when review is needed)</option><option value="fast">Fast (spatial parser, no AI)</option></select></label>
-<label>Output<select name="format"><option value="invoice">Formatted Invoice JSON (AI + validated)</option><option value="json">Raw OCR JSON (technical boxes)</option></select></label>
+<label>Output<select name="format"><option value="invoice">Invoice JSON</option><option value="invoice_debug">Detailed invoice JSON (debug)</option><option value="json">Raw OCR JSON (technical boxes)</option></select></label>
 <p class="hint">PaddleOCR uses Arabic recognition for Arabic/Urdu selections; it also handles Latin text and numbers.</p>
 <button type="submit">Run PaddleOCR</button>
 </form></main></body></html>""".encode("utf-8")
@@ -153,7 +154,7 @@ class Handler(BaseHTTPRequestHandler):
 
         languages = (language_part.get_content() if language_part else "eng+ara").strip()
         output_format = (format_part.get_content() if format_part else "json").strip()
-        if output_format not in {"json", "pdf"}:
+        if output_format not in {"json", "pdf", "invoice_debug"}:
             output_format = "invoice"
         if languages not in {"eng", "ara", "eng+ara", "urd", "eng+urd"}:
             languages = "eng+ara"
@@ -182,7 +183,7 @@ class Handler(BaseHTTPRequestHandler):
             str(input_path), str(output_path),
         ]
         try:
-            if output_format in {"invoice", "json"}:
+            if output_format in {"invoice", "invoice_debug", "json"}:
                 started = perf_counter()
                 if os.environ.get("OCR_PYTHON_EXE"):
                     coordinate_result = subprocess.run(
@@ -208,7 +209,7 @@ class Handler(BaseHTTPRequestHandler):
                     "engine": coordinate_payload["engine"],
                     "pages": coordinate_payload["pages"],
                 }
-                if output_format == "invoice":
+                if output_format in {"invoice", "invoice_debug"}:
                     payload = parse_invoice_hybrid(
                         coordinate_payload["pages"], filename, languages, mode=mode
                     )
@@ -226,7 +227,7 @@ class Handler(BaseHTTPRequestHandler):
                 payload["schema_version"] = "1.0"
                 payload["status"] = payload.get("quality", {}).get("overall_status", "extracted")
                 payload["extraction_methods"] = [p.get("extraction_method", "ocr") for p in coordinate_payload["pages"]]
-                self.send_json(payload)
+                self.send_json(clean_invoice_response(payload) if output_format == "invoice" else payload)
                 return
             result = subprocess.run(command, env=env, capture_output=True, text=True, timeout=1800)
             if result.returncode != 0 or not output_path.exists():

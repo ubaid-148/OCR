@@ -45,6 +45,13 @@ Open <http://127.0.0.1:8765> and upload a PDF invoice.
 
 ## Flow
 
+The default **Invoice JSON** output contains `status`, invoice `data`, and short
+`review_notes`. It omits raw OCR, coordinates, confidence evidence, timings and
+internal validation details. Missing values remain null and uncertain results
+retain `needs_review`. Item `amount` is pre-tax; `gross_amount` includes VAT.
+Select **Detailed invoice JSON (debug)** (`format=invoice_debug`) for the original
+diagnostic response, including derivation evidence. Raw OCR remains a separate option.
+
 The September sample fixes add skew-aware table rows, bounded column matching
 (including serial numbers versus item codes), broader footer labels and payment
 receipt isolation. Invoice fields never use text inside the detected receipt
