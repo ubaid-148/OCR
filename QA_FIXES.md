@@ -1,5 +1,16 @@
 # Invoice extraction fixes — September 2026
 
+## Upload latency follow-up
+
+9480.pdf took 57.0 seconds for OCR on the local CPU (2.9 seconds model setup,
+54.2 seconds rendering/recognition/retries). Its Fast extraction remains incomplete
+and needs review; this latency change does not claim to fix that layout. No live
+Colab timing or GPU speedup was measured. Fast is now the upload default, models
+are prepared during Colab server startup, and the UI reports progress instead of
+only disabling the button. Balanced has a 20-second Colab AI wait and bounded
+generation. Concurrent uploads return 429. All 42 tests pass, including admission
+and failure cleanup checks; notebook code cells pass syntax validation.
+
 The parser now separates receipt text from invoice fields, detects item columns
 with skew-aware geometry, preserves product codes and leading zeros, and matches
 footer totals using additional label forms. Selected-field evidence identifies

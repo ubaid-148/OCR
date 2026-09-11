@@ -151,7 +151,8 @@ def _ask_ollama(pages: list[dict[str, Any]]) -> dict[str, Any]:
     )
     body = {
         "model": OLLAMA_MODEL, "stream": False, "format": INVOICE_SCHEMA,
-        "options": {"temperature": 0, "num_ctx": int(os.environ.get("OLLAMA_NUM_CTX", "8192"))},
+        "options": {"temperature": 0, "num_ctx": int(os.environ.get("OLLAMA_NUM_CTX", "8192")),
+                    "num_predict": int(os.environ.get("OLLAMA_NUM_PREDICT", "2048"))},
         "keep_alive": "30m",
         "messages": [
             {"role": "system", "content": "You are a careful bilingual invoice document-understanding parser. Return only schema-valid JSON."},

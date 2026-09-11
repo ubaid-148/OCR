@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import uuid
 from time import perf_counter
 from email import policy
@@ -29,6 +30,8 @@ COORDINATE_SCRIPT = ROOT / "coordinate_ocr.py"
 UPLOAD_DIR = ROOT / "uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
 MAX_UPLOAD_BYTES = 100 * 1024 * 1024
+PROGRESS = {}
+UPLOAD_SLOT = threading.BoundedSemaphore(1)
 
 
 def normalize_digits(value: str) -> str:
@@ -88,14 +91,15 @@ button:hover {{ background:#0f4b3d; }}
 <p>Upload an invoice PDF. PaddleOCR reads it, local AI understands the layout, and validation checks the totals.</p>
 <p class="hint"><strong>Parser:</strong> Hybrid Local AI v2 (Ollama + spatial fallback)</p>
 {safe_message}
-<form method="post" enctype="multipart/form-data" onsubmit="const b=this.querySelector('button'); b.textContent='Processing OCR... please wait'; b.disabled=true;">
+<form method="post" enctype="multipart/form-data">
 <label>PDF file<input type="file" name="pdf" accept="application/pdf,.pdf" required></label>
 <label>Languages<select name="languages"><option value="eng+ara">English + Arabic</option><option value="eng">English only</option><option value="ara">Arabic only</option><option value="eng+urd">English + Urdu</option></select></label>
-<label>Processing<select name="mode"><option value="auto">Balanced (AI only when review is needed)</option><option value="fast">Fast (spatial parser, no AI)</option></select></label>
+<label>Processing<select name="mode"><option value="fast">Fast (OCR + validation)</option><option value="auto">Balanced (additional AI review; slower)</option></select></label>
 <label>Output<select name="format"><option value="invoice">Invoice JSON</option><option value="invoice_debug">Detailed invoice JSON (debug)</option><option value="json">Raw OCR JSON (technical boxes)</option></select></label>
 <p class="hint">PaddleOCR uses Arabic recognition for Arabic/Urdu selections; it also handles Latin text and numbers.</p>
 <button type="submit">Run PaddleOCR</button>
-</form></main></body></html>""".encode("utf-8")
+</form><p id="progress" role="status" aria-live="polite"></p><pre id="result" style="white-space:pre-wrap;overflow-wrap:anywhere"></pre>
+<script src="/app.js"></script></main></body></html>""".encode("utf-8")
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -119,12 +123,33 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self) -> None:
+        if self.path == '/app.js':
+            data = (ROOT / 'app.js').read_bytes()
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/javascript; charset=utf-8')
+            self.send_header('Content-Length', str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
+        if self.path.startswith('/progress?'):
+            token = parse_qs(self.path.partition('?')[2]).get('id', [''])[0]
+            self.send_json({'stage': PROGRESS.get(token, 'Uploading / waiting for server')})
+            return
         if self.path == "/":
             self.send_html(page())
         else:
             self.send_error(404)
 
     def do_POST(self) -> None:
+        if not UPLOAD_SLOT.acquire(blocking=False):
+            self.send_failure('Another PDF is processing. Wait for it to finish before uploading again.', 429)
+            return
+        try:
+            self.process_upload()
+        finally:
+            UPLOAD_SLOT.release()
+
+    def process_upload(self) -> None:
         if self.path != '/':
             self.send_failure('Unknown endpoint.', 404)
             return
@@ -147,7 +172,7 @@ class Handler(BaseHTTPRequestHandler):
         language_part = next((part for part in message.iter_attachments() if part.get_param("name", header="content-disposition") == "languages"), None)
         format_part = next((part for part in message.iter_attachments() if part.get_param("name", header="content-disposition") == "format"), None)
         mode_part = next((part for part in message.iter_attachments() if part.get_param("name", header="content-disposition") == "mode"), None)
-        mode = "fast" if mode_part and mode_part.get_content().strip() == "fast" else "auto"
+        mode = "auto" if mode_part and mode_part.get_content().strip() == "auto" else "fast"
         if pdf_part is None:
             self.send_failure("No PDF was received.", 400)
             return
@@ -164,6 +189,11 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         job_id = uuid.uuid4().hex
+        progress_id = self.headers.get('X-Progress-ID', '')[:64]
+        def progress(message):
+            self.log_message('%s: %s', job_id, message)
+            if progress_id:
+                PROGRESS[progress_id] = message
         input_path = UPLOAD_DIR / f"{job_id}-input.pdf"
         output_path = UPLOAD_DIR / f"{job_id}-searchable.pdf"
         sidecar_path = UPLOAD_DIR / f"{job_id}-ocr.txt"
@@ -200,7 +230,7 @@ class Handler(BaseHTTPRequestHandler):
                     coordinate_payload = json.loads(coordinate_path.read_text(encoding="utf-8"))
                 else:
                     from coordinate_ocr import extract_pdf
-                    coordinate_payload = extract_pdf(input_path, languages)
+                    coordinate_payload = extract_pdf(input_path, languages, progress=progress)
                 ocr_finished = perf_counter()
                 raw_text = "\n".join(item.get("text", "") for item in coordinate_payload["pages"])
                 payload: dict[str, object] = {
@@ -210,6 +240,7 @@ class Handler(BaseHTTPRequestHandler):
                     "pages": coordinate_payload["pages"],
                 }
                 if output_format in {"invoice", "invoice_debug"}:
+                    progress('Validating invoice' if mode == 'fast' else 'Validating invoice / optional AI review')
                     payload = parse_invoice_hybrid(
                         coordinate_payload["pages"], filename, languages, mode=mode
                     )
@@ -274,6 +305,7 @@ class Handler(BaseHTTPRequestHandler):
             self.log_message("OCR failed: %s", error)
             self.send_failure(f"OCR failed: {error}", 500)
         finally:
+            PROGRESS.pop(progress_id, None)
             for path in (input_path, output_path, sidecar_path, coordinate_path):
                 try:
                     path.unlink(missing_ok=True)
@@ -285,6 +317,12 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
+    if os.environ.get('OCR_PRELOAD', 'false').lower() == 'true':
+        from coordinate_ocr import _get_model, get_ocr_device
+        print('Preparing OCR on', get_ocr_device(), flush=True)
+        for language in ('ar', 'en'):
+            _get_model(language)
+        print('OCR models ready', flush=True)
     server = ThreadingHTTPServer(("127.0.0.1", 8765), Handler)
     print("OCR PDF Lab running at http://127.0.0.1:8765")
     server.serve_forever()

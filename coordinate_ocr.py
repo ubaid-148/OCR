@@ -103,7 +103,9 @@ def _get_model(paddle_language: str):
     return ocr
 
 
-def extract_pdf(input_path: Path, languages: str) -> dict[str, object]:
+def extract_pdf(input_path: Path, languages: str, progress=None) -> dict[str, object]:
+    progress = progress or (lambda message: None)
+    progress('Waiting for OCR worker')
     started = perf_counter()
     with _OCR_LOCK:
         acquired = perf_counter()
@@ -112,10 +114,12 @@ def extract_pdf(input_path: Path, languages: str) -> dict[str, object]:
         def model(language=None):
             nonlocal load_seconds
             start = perf_counter()
+            if (language or paddle_language) not in _MODELS:
+                progress('Preparing recognition model (' + (language or paddle_language) + ')')
             result = _get_model(language or paddle_language)
             load_seconds += perf_counter() - start
             return result
-        payload = _extract_pdf(input_path, languages, paddle_language, model)
+        payload = _extract_pdf(input_path, languages, paddle_language, model, progress)
         payload["device"] = get_ocr_device() if any(p["extraction_method"] == "ocr" for p in payload["pages"]) else "not_used"
         payload["timings_seconds"] = {
             "queue": round(acquired - started, 3),
@@ -125,7 +129,7 @@ def extract_pdf(input_path: Path, languages: str) -> dict[str, object]:
         return payload
 
 
-def _extract_pdf(input_path, languages, paddle_language, model):
+def _extract_pdf(input_path, languages, paddle_language, model, progress=lambda message: None):
     pages = []
     render_dpi = 200
     try:
@@ -138,6 +142,7 @@ def _extract_pdf(input_path, languages, paddle_language, model):
     with document, tempfile.TemporaryDirectory(prefix="paddle-ocr-") as temp_dir:
         temp_root = Path(temp_dir)
         for number, page in enumerate(document, start=1):
+            progress(f'Reading page {number} of {len(document)}')
             try:
                 native = extract_native_words(page) if os.environ.get("OCR_FORCE_RASTER", "false").lower() not in {"true", "1"} else []
             except Exception:
@@ -156,7 +161,9 @@ def _extract_pdf(input_path, languages, paddle_language, model):
             finally:
                 bitmap.close()
             words = []
-            for prediction in model().predict(str(image_path)):
+            predictor = model()
+            progress(f'Recognizing page {number} of {len(document)}')
+            for prediction in predictor.predict(str(image_path)):
                 words.extend(extract_words(prediction))
             page_payload = {
                 "page": number, "render_dpi": render_dpi,
@@ -169,6 +176,7 @@ def _extract_pdf(input_path, languages, paddle_language, model):
             if os.environ.get('OCR_TARGETED_RETRY','true').lower() not in {'false','0','no'}:
                 retry_started=perf_counter()
                 try:
+                    progress(f'Checking uncertain fields on page {number}')
                     retries=retry_regions(page,page_payload,lambda lang='en':model(lang),extract_words,temp_root)
                     merge_retries(page_payload,retries)
                 except Exception as error:

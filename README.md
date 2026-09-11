@@ -45,6 +45,14 @@ Open <http://127.0.0.1:8765> and upload a PDF invoice.
 
 ## Flow
 
+Uploads default to Fast (OCR and validation). Balanced adds optional AI review;
+Colab limits its wait to 20 seconds and generation to 2048 tokens. The page shows
+the current OCR stage and elapsed time and displays formatted JSON without navigation.
+Concurrent uploads receive HTTP 429 instead of accumulating in the native OCR queue.
+Colab loads Arabic and English OCR models during server startup, so model download
+time is visible in setup rather than hidden in the first upload. This moves cold
+startup cost; it does not remove it. GPU acceleration still requires CUDA Paddle.
+
 The default **Invoice JSON** output contains `status`, invoice `data`, and short
 `review_notes`. It omits raw OCR, coordinates, confidence evidence, timings and
 internal validation details. Missing values remain null and uncertain results
