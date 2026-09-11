@@ -4,7 +4,7 @@ from contextlib import closing
 from pathlib import Path
 from invoice_formatter import contains, center, has_arabic
 from document_regions import invoice_words
-from layout_invoice import table, numeric, header_hint, ALIASES
+from layout_invoice import table, numeric, header_hint, ALIASES, parse_layout
 
 
 def plan_regions(page):
@@ -19,6 +19,13 @@ def plan_regions(page):
     page_height=page.get('height',1)*page.get('render_dpi',200)/72
     header_limit=header if header is not None else page_height*.5
     candidates=[]
+    parsed=parse_layout([page],'','')
+    known_invoice=parsed and parsed['invoice'].get('invoice_number')
+    if parsed and not parsed['supplier'].get('name_ar'):
+        name_anchor=next((w for w in words if contains(w['text'],('مؤسسة','مؤسسه','شركة')) and center(w)[1]<header_limit*.5),None)
+        if name_anchor:
+            cluster=[w for w in words if has_arabic(w['text']) and abs(center(w)[1]-center(name_anchor)[1])<h]
+            candidates.append(dict(kind='supplier_name_ar',original=name_anchor,language='ar',bbox=[min(w['left'] for w in cluster)-h*.2,min(w['top'] for w in cluster)-h*.2,max(w['left']+w['width'] for w in cluster)+h*.2,max(w['top']+w['height'] for w in cluster)+h*.2]))
     def add(w,kind,part='whole'):
         x0,y0=w['left'],w['top'];x1=x0+w['width'];y1=y0+w['height']
         if part=='left':x1=x0+w['width']*.62
@@ -28,7 +35,7 @@ def plan_regions(page):
     for w in sorted(words,key=lambda w:(w['top'],w['left'])):
         text=w['text']
         if center(w)[1]<header_limit:
-            if (contains(text,('invoice no','invoice number','inv no','رقم الفاتورة')) or 'رقم' in text and 'فاتور' in text) and not re.search(r'\b[A-Za-z]+[-/]\d+',text):
+            if not known_invoice and (contains(text,('invoice no','invoice number','inv no','رقم الفاتورة')) or 'رقم' in text and 'فاتور' in text) and not re.search(r'\b[A-Za-z]+[-/]\d+',text):
                 add(w,'invoice_identifier','identifier')
                 # Arabic forms can place the value to the left of its label.
                 if not re.search('[A-Za-z]',text):add(w,'invoice_identifier','left')
@@ -46,6 +53,16 @@ def plan_regions(page):
         elif header and center(w)[1]>header and re.fullmatch(r'\d+[.]\d*[A-Za-z]',text) and numeric(text) is None:
             add(w,'numeric_cell')
     for item in rows:
+        if item.get('quantity') is None:
+            heading=next((w for w in words if contains(w['text'],ALIASES['quantity']) and abs(center(w)[1]-(header or 0))<h*3),None)
+            row_evidence=item.get('field_evidence',{}).get('amount') or item.get('field_evidence',{}).get('unit_price')
+            if heading and row_evidence:
+                _,ry,_,rh=row_evidence['bbox']
+                unknown=next((w for w in words if abs(center(w)[0]-center(heading)[0])<h and abs(center(w)[1]-(ry+rh/2))<h),None)
+                if unknown:
+                    add(unknown,'numeric_cell')
+                    candidates[-1]['bbox']=[unknown['left']-h*.85,unknown['top']-h*.85,unknown['left']+unknown['width']+h*.85,unknown['top']+unknown['height']+h*.85]
+                    candidates[-1]['dpi']=400
         for evidence in item.get('field_evidence',{}).get('description',[]):
             text=evidence['text']
             if has_arabic(text) and not re.search('[A-Za-z]',text) and len(text)>=8 and not re.search('[A-Za-z]',item.get('description') or ''):
@@ -58,7 +75,7 @@ def plan_regions(page):
                 if hint+h*.5<center(w)[1]<hint+h*3 and abs(center(w)[0]-center(description_label)[0])<h*4 and has_arabic(w['text']) and not re.search('[A-Za-z]',w['text']) and len(w['text'])>=8:
                     add(w,'description','left')
     # Prioritize identifiers and numeric cells before optional text improvements.
-    order={'numeric_cell':0,'invoice_identifier':1,'vat_identifier':2,'date':3,'supplier_name':4,'description':5}
+    order={'numeric_cell':0,'invoice_identifier':1,'vat_identifier':2,'supplier_name_ar':3,'date':4,'supplier_name':5,'description':6}
     candidates=sorted(candidates,key=lambda r:(order[r['kind']],r['bbox'][1],r['bbox'][0]))[:6]
     if incomplete_table and hint is not None:
         candidates.insert(0,dict(bbox=[0,hint-h,page_width,hint+3*h],kind='table_cells',original={},language='en' if any(contains(w['text'],('unit price',)) for w in words) else 'ar'))
@@ -107,7 +124,7 @@ def retry_regions(pdf_page,page_payload,model,extract_words,temp_root):
         if x1<=x0 or y1<=y0:continue
         path=Path(temp_root)/f'retry-{i}.png'
         crop=(x0*72/dpi,(page_height-y1)*72/dpi,(page_width-x1)*72/dpi,y0*72/dpi)
-        retry_dpi=400 if region.get('enhance') else 300
+        retry_dpi=region.get('dpi',400 if region.get('enhance') else 300)
         scale=retry_dpi/dpi
         with closing(pdf_page.render(scale=retry_dpi/72,crop=crop)) as bitmap:
             picture=bitmap.to_pil().convert('RGB')
@@ -120,14 +137,23 @@ def retry_regions(pdf_page,page_payload,model,extract_words,temp_root):
                 cv2.imwrite(str(path),gray)
             else:picture.save(path)
         found=[]
-        predictor=model(region.get('language','ar')) if region['kind']=='table_cells' else model()
-        for result in predictor.predict(str(path)):
+        predictor=model(region.get('language','ar')) if region['kind'] in {'table_cells','supplier_name_ar'} else model()
+        options={'text_det_thresh':.1,'text_det_box_thresh':.2} if region['kind']=='numeric_cell' else {}
+        for result in predictor.predict(str(path),**options):
             for word in extract_words(result):
                 word.update(left=word['left']/scale+x0,top=word['top']/scale+y0,
                             width=word['width']/scale,height=word['height']/scale,
                             polygon=[[x/scale+x0,y/scale+y0] for x,y in word['polygon']],
                             source='targeted_ocr',retry_kind=region['kind'])
                 found.append(word)
+        if region['kind']=='supplier_name_ar' and not any(contains(w['text'],('مؤسسة','مؤسسه','شركة')) and len(w['text'])>12 for w in found):
+            # The Arabic name may be fragmented by detection; read the complete label line.
+            import cv2
+            for result in predictor.paddlex_pipeline.text_rec_model([cv2.imread(str(path))]):
+                found.append(dict(text=result['rec_text'],confidence=float(result['rec_score'])*100,
+                                  left=x0,top=y0,width=x1-x0,height=y1-y0,
+                                  polygon=[[x0,y0],[x1,y0],[x1,y1],[x0,y1]],
+                                  source='targeted_ocr',retry_kind=region['kind']))
         retries.append(dict(kind=region['kind'],bbox=[x0,y0,x1,y1],original=region['original'],words=found))
     return retries
 
@@ -149,7 +175,9 @@ def merge_retries(page, retries):
                 elif re.fullmatch(r'\d{3,}',text):
                     candidates.append(word)
             elif kind=='numeric_cell' and numeric(text) is not None:
-                candidates.append(word)
+                original=retry['original']
+                if abs(center(word)[1]-center(original)[1])<=max(original.get('height',20),word.get('height',20))*.75:
+                    candidates.append(word)
             elif kind=='table_cells':
                 candidates.append(word)
             elif kind=='date' and re.search(r'\d{1,2}[-/]\d{1,2}[-/]\d{4}',text):
@@ -160,13 +188,15 @@ def merge_retries(page, retries):
                 candidates.append(word)
             elif kind=='supplier_name' and re.search(r'[A-Za-z]{3,}',text) and len(text)>8:
                 candidates.append(word)
+            elif kind=='supplier_name_ar' and has_arabic(text) and contains(text,('مؤسسة','مؤسسه','شركة')) and len(text)>12:
+                candidates.append(word)
         if kind in {'numeric_cell','vat_identifier','invoice_identifier'} and len(candidates)!=1:
             continue
         if kind=='numeric_cell' and candidates:
             words=[w for w in words if w!=retry['original']]
         for w in candidates:
             # Do not duplicate a successfully read same-language source phrase.
-            if any(w['text'].casefold()==old['text'].casefold() and abs(center(w)[1]-center(old)[1])<old.get('height',20) for old in words):continue
+            if any(w['text'].casefold()==old['text'].casefold() and abs(center(w)[1]-center(old)[1])<old.get('height',20) and abs(center(w)[0]-center(old)[0])<max(w.get('width',1),old.get('width',1))*.5 for old in words):continue
             words.append(w);accepted.append(dict(kind=kind,text=w['text'],bbox=[w[k] for k in ('left','top','width','height')]))
     page['words']=words
     page['text']='\n'.join(w['text'] for w in words)

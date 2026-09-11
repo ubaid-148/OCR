@@ -45,6 +45,13 @@ Open <http://127.0.0.1:8765> and upload a PDF invoice.
 
 ## Flow
 
+Explicit supplier/customer VAT labels, colon-prefixed identifiers and shared
+subtotal/VAT rows are supported. Missing quantity glyphs trigger padded numeric
+retries; a serial number in another column cannot suppress a recovered quantity.
+Clean JSON also includes printed customer address, item units, bank details,
+business description and amount-in-words when found. Handwriting and signature
+verification are not implemented; recovered Arabic names may still need spelling review.
+
 Faint tables retain partial rows when quantity is unreadable. Explicit alphabetic
 item-code columns are supported. Total excluding VAT and total including VAT are
 mapped separately; nearby dates and VAT identifiers cannot become invoice numbers.

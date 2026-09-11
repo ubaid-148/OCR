@@ -289,12 +289,14 @@ def _parse_invoice_hybrid(pages: list[dict[str, Any]], source_filename: str, lan
 
 
 def parse_invoice_hybrid(pages, source_filename, language, mode='auto'):
+    from invoice_details import add_printed_details
     clean=[];receipts=[]
     for i,page in enumerate(pages):
         words,region=invoice_words(page)
         clean.append(dict(page,words=words,receipt_region=region))
         if region:receipts.append(dict(page=page.get('page',i+1),bbox=region))
     result=_parse_invoice_hybrid(clean,source_filename,language,mode)
+    add_printed_details(result['data'],clean)
     for item in result['data'].get('items',[]):
         for key in ('vat_amount','discount','gross_amount','amount_source'):
             item.setdefault(key,None)
@@ -308,7 +310,7 @@ def parse_invoice_hybrid(pages, source_filename, language, mode='auto'):
     if any(page.get('targeted_ocr_error') for page in pages):
         quality.update(needs_review=True,overall_status='needs_review')
         quality['targeted_ocr_errors']=[page['targeted_ocr_error'] for page in pages if page.get('targeted_ocr_error')]
-    if any(a['kind'] in {'supplier_name','description'} for page in pages for a in page.get('targeted_ocr',{}).get('accepted',[])):
+    if any(a['kind'] in {'supplier_name','supplier_name_ar','description'} for page in pages for a in page.get('targeted_ocr',{}).get('accepted',[])):
         quality.update(needs_review=True,overall_status='needs_review')
         quality.setdefault('review_reasons',[]).append('Check supplier/description spelling recovered by targeted OCR against the source.')
     return result

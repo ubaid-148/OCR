@@ -1,5 +1,28 @@
 # Invoice extraction fixes — September 2026
 
+## 9867: missed rows and explicit field roles
+
+The source has three items, not one. Two quantity glyphs were misrecognized as
+text. Rows now survive gaps in quantity anchors, and padded numeric crops with
+lower detection thresholds recover those glyphs while retaining the 85% recognition
+acceptance threshold. Retry deduplication checks both X and Y: a serial `1` must
+not suppress a quantity `1` on the same line. An ITEM header is matched exactly,
+so Item Subtotal cannot become an item-code column.
+
+Explicit customer/supplier VAT labels override vertical ordering. Customer-details
+headings are not names. Colon-prefixed invoice values are accepted. A shared TOTAL
+row maps amount and VAT by their respective columns. Bank details, customer address,
+business description and amount-in-words are exposed when printed labels support them.
+
+Source-PDF crop tests recovered invoice 4680, both VAT IDs, customer, all three item
+codes and quantities, prices 75/10/10, line VAT 11.25/1.50/1.50, subtotal 95,
+VAT 14.25 and total 109.25. Arabic supplier-name recognition still reads one word
+incorrectly and retains a spelling-review flag. Handwriting and signature presence
+are not verified by this pipeline. No model training was performed; these are
+general parsing and recognition-crop fixes, without hardcoded sample answers.
+50 synthetic regression tests pass, previous 9605–9607 acceptance checks pass in
+both modes, and selected 9609/9480 evidence replay checks pass.
+
 ## Faint invoice mapping follow-up
 
 9480 exposed missing quantity anchors, alphabetic item codes, customer VAT labels
