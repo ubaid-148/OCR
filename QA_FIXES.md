@@ -1,5 +1,25 @@
 # Invoice extraction fixes — September 2026
 
+## Faint invoice mapping follow-up
+
+9480 exposed missing quantity anchors, alphabetic item codes, customer VAT labels
+above customer names, and separate Total (Excl) VAT / Total With VAT footers.
+The parser now retains a partial row, separates those totals, excludes VAT IDs and
+dates from nearby invoice-number candidates, and rejects tiny QR noise as footer
+amounts. Faint English ruled cells receive bounded 400 DPI contrast/thickening
+retries. Unreconciled corrected prices on quantity-missing rows remain null.
+
+The saved base OCR plus new source-PDF crops yields one partial item with printed
+amount 180, subtotal 180, VAT 27 and invoice total 207. Quantity, unit price, item
+code, customer name and invoice number remain unresolved; description spelling
+also requires review. Printed and handwritten dates differ, so the returned
+printed date must not be taken as resolution of that conflict. This is a mapping
+and conservative recovery fix, not complete transcription of the faint source.
+All 46 regression tests pass. Previous 9605–9607 selected checks pass in both
+modes; 9609's invoice number, item code and total also pass evidence replay.
+The final full-PDF CPU run of 9480 also retained one partial item and returned
+subtotal 180, VAT 27 and total 207. Unresolved fields remain flagged for review.
+
 ## Upload latency follow-up
 
 9480.pdf took 57.0 seconds for OCR on the local CPU (2.9 seconds model setup,

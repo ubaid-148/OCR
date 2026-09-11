@@ -45,6 +45,12 @@ Open <http://127.0.0.1:8765> and upload a PDF invoice.
 
 ## Flow
 
+Faint tables retain partial rows when quantity is unreadable. Explicit alphabetic
+item-code columns are supported. Total excluding VAT and total including VAT are
+mapped separately; nearby dates and VAT identifiers cannot become invoice numbers.
+Selected faint English table crops use 400 DPI with contrast and stroke thickening.
+This does not guarantee recovery: uncertain fields remain null and require review.
+
 Uploads default to Fast (OCR and validation). Balanced adds optional AI review;
 Colab limits its wait to 20 seconds and generation to 2048 tokens. The page shows
 the current OCR stage and elapsed time and displays formatted JSON without navigation.

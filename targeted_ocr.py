@@ -11,6 +11,7 @@ def plan_regions(page):
     words,_=invoice_words(page)
     h=sorted([w.get('height',20) for w in words])[len(words)//2] if words else 20
     rows,header,_=table(words)
+    incomplete_table=not rows or any(item.get('quantity') is None for item in rows)
     hint=header_hint(words)
     if header is None:
         header=hint
@@ -39,7 +40,10 @@ def plan_regions(page):
                 add(w,'date','whole')
             elif has_arabic(text) and re.search('[A-Za-z]',text) and any(t in text for t in ('شركة','مؤسسة','مؤسسه')) and len(text)>25:
                 add(w,'supplier_name','left')
-        if header and center(w)[1]>header and re.fullmatch(r'\d+[.]\d*[A-Za-z]',text) and numeric(text) is None:
+        if header and center(w)[1]>header and numeric(text) is not None and w.get('confidence',100)<80 and re.search(r'\d[.]\d',text):
+            add(w,'numeric_cell')
+            candidates[-1]['enhance']=True
+        elif header and center(w)[1]>header and re.fullmatch(r'\d+[.]\d*[A-Za-z]',text) and numeric(text) is None:
             add(w,'numeric_cell')
     for item in rows:
         for evidence in item.get('field_evidence',{}).get('description',[]):
@@ -47,17 +51,17 @@ def plan_regions(page):
             if has_arabic(text) and not re.search('[A-Za-z]',text) and len(text)>=8 and not re.search('[A-Za-z]',item.get('description') or ''):
                 w=next((w for w in words if [w.get(k) for k in ('left','top','width','height')]==evidence['bbox']),None)
                 if w:add(w,'description','left')
-    if not rows and hint is not None:
+    if incomplete_table and hint is not None:
         description_label=next((w for w in words if contains(w['text'],ALIASES['description']) and abs(center(w)[1]-hint)<h*2),None)
         if description_label:
             for w in words:
                 if hint+h*.5<center(w)[1]<hint+h*3 and abs(center(w)[0]-center(description_label)[0])<h*4 and has_arabic(w['text']) and not re.search('[A-Za-z]',w['text']) and len(w['text'])>=8:
                     add(w,'description','left')
     # Prioritize identifiers and numeric cells before optional text improvements.
-    order={'invoice_identifier':0,'vat_identifier':1,'date':2,'numeric_cell':3,'supplier_name':4,'description':5}
+    order={'numeric_cell':0,'invoice_identifier':1,'vat_identifier':2,'date':3,'supplier_name':4,'description':5}
     candidates=sorted(candidates,key=lambda r:(order[r['kind']],r['bbox'][1],r['bbox'][0]))[:6]
-    if not rows and hint is not None:
-        candidates.insert(0,dict(bbox=[0,hint-h,page_width,hint+3*h],kind='table_cells',original={}))
+    if incomplete_table and hint is not None:
+        candidates.insert(0,dict(bbox=[0,hint-h,page_width,hint+3*h],kind='table_cells',original={},language='en' if any(contains(w['text'],('unit price',)) for w in words) else 'ar'))
     return candidates
 
 
@@ -79,7 +83,7 @@ def grid_cells(pdf_page,region,dpi,page_width,page_height):
         if not groups or x-groups[-1][-1]>4:groups.append([x])
         else:groups[-1].append(x)
     edges=[sum(g)/len(g)/factor for g in groups]
-    return [dict(kind='table_cells',bbox=[a+2,y0,b-2,y1],original={}) for a,b in zip(edges,edges[1:]) if b-a>15][:8]
+    return [dict(kind='table_cells',bbox=[a+2,y0,b-2,y1],original={},language=region.get('language','ar')) for a,b in zip(edges,edges[1:]) if b-a>15][:8]
 
 
 def retry_regions(pdf_page,page_payload,model,extract_words,temp_root):
@@ -88,7 +92,14 @@ def retry_regions(pdf_page,page_payload,model,extract_words,temp_root):
     retries=[]
     regions=[]
     for region in plan_regions(page_payload):
-        if region['kind']=='table_cells':regions.extend(grid_cells(pdf_page,region,dpi,page_width,page_height))
+        if region['kind']=='table_cells':
+            cells=grid_cells(pdf_page,region,dpi,page_width,page_height)
+            if region.get('language')=='en':
+                h=region['bbox'][3]-region['bbox'][1]
+                for cell in cells:
+                    cell['bbox'][1]=region['bbox'][1]+h*.45
+                    cell['enhance']=True
+            regions.extend(cells)
         else:regions.append(region)
     for i,region in enumerate(regions):
         x0,y0,x1,y1=region['bbox']
@@ -96,10 +107,20 @@ def retry_regions(pdf_page,page_payload,model,extract_words,temp_root):
         if x1<=x0 or y1<=y0:continue
         path=Path(temp_root)/f'retry-{i}.png'
         crop=(x0*72/dpi,(page_height-y1)*72/dpi,(page_width-x1)*72/dpi,y0*72/dpi)
-        with closing(pdf_page.render(scale=300/72,crop=crop)) as bitmap:
-            bitmap.to_pil().convert('RGB').save(path)
+        retry_dpi=400 if region.get('enhance') else 300
+        scale=retry_dpi/dpi
+        with closing(pdf_page.render(scale=retry_dpi/72,crop=crop)) as bitmap:
+            picture=bitmap.to_pil().convert('RGB')
+            if region.get('enhance'):
+                import cv2
+                import numpy as np
+                gray=cv2.cvtColor(np.array(picture),cv2.COLOR_RGB2GRAY)
+                gray=cv2.normalize(gray,None,0,255,cv2.NORM_MINMAX)
+                gray=cv2.erode(gray,np.ones((3,3),np.uint8))
+                cv2.imwrite(str(path),gray)
+            else:picture.save(path)
         found=[]
-        predictor=model('ar') if region['kind']=='table_cells' else model()
+        predictor=model(region.get('language','ar')) if region['kind']=='table_cells' else model()
         for result in predictor.predict(str(path)):
             for word in extract_words(result):
                 word.update(left=word['left']/scale+x0,top=word['top']/scale+y0,
