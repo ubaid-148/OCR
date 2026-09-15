@@ -20,6 +20,10 @@ class InvoiceRegionTests(unittest.TestCase):
         words += [box(t,x,360) for t,x in [('A-101',20),('Example item',300),('2',650),('10.00',850),('20.00',1050)]]
         plans=plan_regions(dict(words=words,width=500,height=700,render_dpi=200))
         self.assertNotIn('table_cells',[p['kind'] for p in plans])
+        footer=next(p for p in plans if p['kind']=='footer_totals')
+        self.assertEqual(footer['bbox'][0],0)
+        self.assertAlmostEqual(footer['bbox'][2],500*200/72)
+        self.assertGreaterEqual(footer['bbox'][1],700*200/72*.5)
 
     def test_joined_arabic_unit_and_price_headers(self):
         self.assertTrue(header_match('سعر افراديالوحدة',('سعر افرادي',)))

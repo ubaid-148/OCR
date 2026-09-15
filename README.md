@@ -87,7 +87,7 @@ cell crops when rows or explicitly labelled item codes/quantities are missing.
 Missing totals and source arithmetic discrepancies no longer trigger a costly
 whole-table retry; they use focused footer crops and remain flagged for review.
 Header fields can be recovered independently of table detection. Responses carry
-`pipeline_version: 2026-09-fast-accuracy-v5` to identify this flow.
+`pipeline_version: 2026-09-multi-layout-v6` to identify this flow.
 Typed candidates below 85% confidence are not promoted; raw alternatives remain in the
 OCR output. Set `OCR_TARGETED_RETRY=false` to disable retries. Both recognition
 models are cached after first use. Retry failures preserve the base OCR and flag

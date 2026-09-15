@@ -54,6 +54,16 @@ class FlowTests(unittest.TestCase):
         result=clean_invoice_response(payload)
         self.assertEqual(result["local_ai_error"],"timed out")
 
+    def test_abbreviated_customer_label_is_not_a_customer_name(self):
+        source=pages()
+        source[0]['words'] += [
+            {'text':'Cust.Name','left':100,'top':180,'width':100,'height':20,'confidence':99},
+            {'text':'Example Buyer Trading Co.','left':260,'top':180,'width':240,'height':20,'confidence':99},
+        ]
+        with patch('local_ai_parser._ask_ollama',side_effect=OSError('offline')):
+            result=parse_invoice_hybrid(source,'example.pdf','eng+ara')
+        self.assertNotEqual(result['data']['customer']['name'],'Cust.Name')
+
     def test_json_error_preserves_message(self):
         handler = object.__new__(Handler)
         handler.wfile = io.BytesIO()

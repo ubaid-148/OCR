@@ -29,10 +29,10 @@ DATE_LABELS = (
     'تاريخ اصدار الفاتورة','تاريخ إصدار الفاتورة','تاريخ ووقت اصدار الفاتورة','تاريخ ووقت إصدار الفاتورة',
 )
 CUSTOMER_SECTION_LABELS = (
-    'buyer','bill to','customer','customer details','customer name','customer code','cus code',
+    'buyer','bill to','customer','customer details','customer name','cust name','cust.name','custname','customer code','cus code',
     'المشتري','العميل','السادة','تفاصيل العميل','تفاصيل العملاء','اسم العميل','كود العميل','رقم العميل',
 )
-CUSTOMER_NAME_LABELS = ('buyer name','customer name','name of customer','اسم العميل','اسم المشتري','اسم الزبون')
+CUSTOMER_NAME_LABELS = ('buyer name','customer name','cust name','cust.name','custname','name of customer','اسم العميل','اسم المشتري','اسم الزبون')
 CUSTOMER_VAT_LABELS = (
     'customer vat','buyer vat','customer tax number','buyer tax number',
     'الرقم الضريبي للعميل','الرقم الضريبي للمشتري','رقم ضريبة العميل','الرقم الضريبي للزبون',
@@ -143,7 +143,8 @@ def table(words):
             if numeric(w['text']) is None and w.get('height',h)<h*2 and abs(center(w)[0]-hx['description'])<tolerance('description') and not contains(w['text'],('total','vat','discount')):
                 row_peers=[p for p in body if abs(y(p)-y(w))<h*1.15]
                 numeric_peers=[p for p in row_peers if numeric(p['text']) is not None and any(abs(center(p)[0]-hx[k])<tolerance(k) for k in ('unit_price','amount'))]
-                coded='item_code' in hx and any(abs(center(p)[0]-hx['item_code'])<tolerance('item_code') and re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9/-]{2,}',p['text']) for p in row_peers)
+                coded='item_code' in hx and any(abs(center(p)[0]-hx['item_code'])<tolerance('item_code') and
+                    re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9./#*+() -]{1,60}',normalize(p['text'])) for p in row_peers)
                 if (len(numeric_peers)>=2 or coded) and all(abs(y(w)-y(a))>h*1.15 for a in unique):unique.append(w)
         unique.sort(key=y)
         items=[]
@@ -162,7 +163,7 @@ def table(words):
             if price is anchor: price=None
             if amount is anchor or amount is price: amount=None
             code=None
-            code_candidates=[w for w in row if re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9/-]{2,}',normalize(w['text'])) and ('item_code' in hx or re.search(r'\d',w['text']))]
+            code_candidates=[w for w in row if re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9./#*+() -]{1,60}',normalize(w['text'])) and ('item_code' in hx or re.search(r'\d',w['text']))]
             if 'item_code' in hx:
                 code=min((w for w in code_candidates if abs(center(w)[0]-hx['item_code'])<=tolerance('item_code')),
                          key=lambda w:abs(center(w)[0]-hx['item_code']),default=None)
@@ -181,6 +182,10 @@ def table(words):
             desc=[w for w in row if is_desc(w)]
             next_y=y(unique[i+1]) if i+1<len(unique) else stop
             desc += [w for w in body if w not in row and h*1.15<=y(w)-y(anchor)<=h*2.5 and y(w)<next_y-h*.8 and is_desc(w)]
+            if any(w.get('source')=='targeted_ocr' and has_arabic(w['text']) for w in desc):
+                # Prefer the focused Arabic re-read over a low-confidence Latin
+                # hallucination produced from the same faint dot-matrix text.
+                desc=[w for w in desc if has_arabic(w['text']) or w.get('source')=='native_text' or float(w.get('confidence') or 0)>=85]
             if not desc or (price is None and amount is None):
                 continue
             qty=None if quantity_missing else numeric(anchor['text']);pv=numeric(price['text']) if price else None
@@ -191,15 +196,20 @@ def table(words):
             dv=numeric(discount['text']) if discount else None
             gross_word=cell('gross_amount')
             unit_word=min((w for w in row if 'unit' in hx and abs(center(w)[0]-hx['unit'])<tolerance('unit') and re.fullmatch(r'(?i)pcs?\.?|sets?|kg|m|ltr|box|roll',w['text'].strip())),key=lambda w:abs(center(w)[0]-hx['unit']),default=None)
-            derived=False;gross=av if gross_column else numeric(gross_word['text']) if gross_word else None
+            derived=False;total_is_pretax=False
+            gross=av if gross_column else numeric(gross_word['text']) if gross_word else None
             if gross_column:
                 av=None
-                if qty is not None and pv is not None and tv is not None and gross is not None:
-                    calculated=Decimal(str(qty))*Decimal(str(pv))-Decimal(str(dv or 0))
+                calculated=Decimal(str(qty))*Decimal(str(pv))-Decimal(str(dv or 0)) if qty is not None and pv is not None else None
+                if calculated is not None and gross is not None and abs(calculated-Decimal(str(gross)))<=Decimal('.02'):
+                    # With a blank per-line VAT cell, Total may still be the
+                    # printed pre-tax amount (quantity x unit price).
+                    av=gross;gross=None;total_is_pretax=True
+                elif calculated is not None and tv is not None and gross is not None:
                     if abs(calculated+Decimal(str(tv))-Decimal(str(gross)))<=Decimal('.02'):
                         av=float(calculated);derived=True
-            ev={k:proof(w) for k,w in [('quantity',None if quantity_missing else anchor),('unit_price',price),('amount',None if gross_column else amount),
-                                      ('item_code',code),('vat_amount',tax),('discount',discount),('gross_amount',amount if gross_column else gross_word)] if w}
+            ev={k:proof(w) for k,w in [('quantity',None if quantity_missing else anchor),('unit_price',price),('amount',amount if not gross_column or total_is_pretax else None),
+                                      ('item_code',code),('vat_amount',tax),('discount',discount),('gross_amount',amount if gross_column and not total_is_pretax else gross_word)] if w}
             ev['description']=[proof(w) for w in desc]
             if unit_word:ev['unit']=proof(unit_word)
             items.append(dict(line_no=len(items)+1,item_code=normalize(code['text']) if code and (code.get('source')=='native_text' or code.get('confidence',0)>=85) else None,
@@ -235,7 +245,8 @@ def parse_layout(pages,filename,language):
         if label is None:return None
         candidates=[w for w in pool if w is not label and predicate(w['text']) and
                     (abs(y(w)-y(label))<=h*.95 or 0<y(w)-y(label)<=h*below and abs(w['left']-label['left'])<h*3)]
-        return min(candidates,key=lambda w:(abs(y(w)-y(label))>h*.95,abs(y(w)-y(label))*4+abs(w['left']-label['left']),w['text']),default=None)
+        return min(candidates,key=lambda w:(float(w.get('height',h))>h*1.8,abs(y(w)-y(label))>h*.95,
+                                            abs(y(w)-y(label))*4+abs(w['left']-label['left']),w['text']),default=None)
     inv=None;date=None;time=None
     for w in words:
         if w.get('retry_kind')=='invoice_identifier':
@@ -271,15 +282,16 @@ def parse_layout(pages,filename,language):
     buyer=min(buyer_candidates,key=lambda w:(buyer_rank(w),y(w),w['left']),default=None)
     def name_text(s):
         normalized=normalize(s).strip(' :')
+        label_only=normalized.casefold().replace('.',' ').strip() in {'customer','customer name','cust name','custname','buyer','buyer name'}
         joined_address=bool(re.search(r'(?i)(?:building|post\s*code|add(?:itional)?\s*no|short\s*adrs|المبنى|الرمز\s*البريدي|الرقم\s*الإضافي)\s*[:#-]?\s*\d',normalized))
         identifier_like=bool(number_string(normalized,{15}) or re.search(r'(?i)(?:tax\s*code|taxcode|vat\s*(?:no|number)|الرقم\s*الضريبي)',normalized))
-        return (not joined_address and not identifier_like and len(normalized)>8 and bool(re.search(r'[A-Za-z\u0600-\u06ff]',normalized)) and
+        return (not label_only and not joined_address and not identifier_like and len(normalized)>8 and bool(re.search(r'[A-Za-z\u0600-\u06ff]',normalized)) and
                 not contains(normalized,('invoice','date','vat','tax','building no','street','mobile','postal','number','email',
                     'customer details','customer code','cus code','customer no','cr no','commercial registration',
                     'تفاصيل العميل','تفاصيل العملاء','كود العميل','رقم العميل','السجل التجاري','الرقم الضريبي',
                     'رقم','التاريخ','عنوان','المبنى','الشارع','الحي','الرمز البريدي')))
     def customer_tail(s):
-        value=re.sub(r'(?i)^(?:customer\s+|buyer\s+)?name\s*[:：]?\s*','',s).strip(' :')
+        value=re.sub(r'(?i)^(?:(?:customer|cust\.?|buyer)\s*)?name\s*[:：]?\s*','',s).strip(' :')
         return re.sub(r'^(?:اسم\s+(?:العميل|المشتري|الزبون))\s*[:：]?\s*','',value).strip(' :')
     buyer_name=None
     if buyer:
