@@ -1,6 +1,6 @@
 # Multi-layout invoice model training
 
-This repository now contains a private, source-verified training workflow. It does **not** contain invoice PDFs, annotations, predictions, or model weights. Keep all of those in a private Google Drive directory.
+This repository now contains a source-verified training workflow and the 111 invoice PDFs that the user explicitly authorized for public distribution. It does **not** contain corrected annotations, rendered training pages, predictions, or model weights. Keep those artifacts in a private Google Drive directory.
 
 ## Why verification comes before training
 
@@ -12,8 +12,8 @@ The target is layout-independent extraction, not memorizing a supplier template.
 
 Open [`colab_dataset.ipynb`](https://colab.research.google.com/github/ubaid-148/OCR/blob/main/colab_dataset.ipynb) in a GPU Colab runtime.
 
-1. Copy the local PDF folder to a **private** Google Drive folder.
-2. Set `PDF_DIR`, `WORK_DIR`, and `VERIFIED_BY` in the configuration cell.
+1. Leave `PDF_DIR` blank to use the public PDFs bundled with the repository, or set it to another folder.
+2. Set the private Drive `WORK_DIR` and `VERIFIED_BY` in the configuration cell.
 3. Prepare page images and generate resumable OCR drafts. Drafting uses the existing spatial pipeline in Fast mode; it never marks output as verified.
 4. In the annotation dashboard, compare every field and every item row with the displayed source pages. Use **Verify + include** only for complete ground truth. Use **Verify + exclude** for duplicates, non-invoices, irrecoverably obscured documents, or documents whose source cannot be read reliably.
 5. Run validation and export. Arithmetic differences are warnings because printed source values must not be silently replaced with calculated values.
@@ -37,7 +37,7 @@ The adapter is not automatically connected to the OCR application. Deployment is
 ## Command-line tools
 
 ```bash
-python -m training.invoice_dataset prepare --pdf-dir /private/pdfs --work-dir /private/work
+python -m training.invoice_dataset prepare --pdf-dir /public/repo/pdfs --work-dir /private/work --allow-public-pdf-dir
 python -m training.invoice_dataset draft --work-dir /private/work
 python -m training.invoice_dataset validate --work-dir /private/work
 python -m training.invoice_dataset export-qwen --work-dir /private/work --min-verified 80
@@ -48,4 +48,3 @@ Training-data unit tests do not run OCR:
 ```bash
 python -m unittest -v test_training_dataset
 ```
-

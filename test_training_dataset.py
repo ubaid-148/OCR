@@ -128,7 +128,7 @@ class TrainingDatasetTests(unittest.TestCase):
             pdfs = root / "pdfs"
             pdfs.mkdir()
             (pdfs / "one.pdf").write_bytes(b"not opened because privacy guard runs first")
-            with self.assertRaisesRegex(ValueError, "outside a Git worktree"):
+            with self.assertRaisesRegex(ValueError, "WORK_DIR must stay outside"):
                 prepare_workspace(pdfs, root / "private")
 
     def test_qwen_colab_patch_is_checked_and_idempotent(self):

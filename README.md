@@ -47,7 +47,7 @@ Open <http://127.0.0.1:8765> and upload a PDF invoice.
 
 The repository includes a two-notebook, source-verified training workflow for a folder of unrelated invoice layouts. Use [colab_dataset.ipynb](https://colab.research.google.com/github/ubaid-148/OCR/blob/main/colab_dataset.ipynb) to create resumable OCR drafts, review every value against private Drive page images, and export supplier/layout-isolated splits. Then use [colab_train.ipynb](https://colab.research.google.com/github/ubaid-148/OCR/blob/main/colab_train.ipynb) in a fresh GPU runtime for Qwen3-VL 2B LoRA training and held-out gates. See [TRAINING.md](TRAINING.md).
 
-PDFs, labels, rendered pages, predictions, and adapters are ignored and must not be committed to this public repository. OCR/cloud output is only a draft: export defaults to at least 80 explicitly verified documents. A trained adapter is rejected if it regresses on held-out critical fields, invalid JSON, exact-document accuracy, or unsupported-value behavior. Passing a private test set is not a 100% guarantee for unseen formats, so evidence validation and `needs_review` remain required.
+The 111 PDFs in `public_invoice_pdfs/` were explicitly authorized by the user for public distribution. Corrected labels, rendered pages, predictions, and adapters remain ignored and must not be committed. OCR/cloud output is only a draft: export defaults to at least 80 explicitly verified documents. A trained adapter is rejected if it regresses on held-out critical fields, invalid JSON, exact-document accuracy, or unsupported-value behavior. Passing a private test set is not a 100% guarantee for unseen formats, so evidence validation and `needs_review` remain required.
 
 ## Flow
 

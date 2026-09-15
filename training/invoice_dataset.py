@@ -257,14 +257,18 @@ def _safe_id(path: Path, digest: str, used: set[str]) -> str:
     return result
 
 
-def prepare_workspace(pdf_dir: Path, work_dir: Path, dpi: int = 200) -> dict[str, Any]:
+def prepare_workspace(
+    pdf_dir: Path, work_dir: Path, dpi: int = 200, allow_public_pdf_dir: bool = False
+) -> dict[str, Any]:
     try:
         import pypdfium2 as pdfium
     except ImportError as error:
         raise RuntimeError("pypdfium2 is required: pip install pypdfium2") from error
     pdf_dir, work_dir = pdf_dir.resolve(), work_dir.resolve()
-    if _inside_git_worktree(pdf_dir) or _inside_git_worktree(work_dir):
-        raise ValueError("PDF_DIR and WORK_DIR must stay outside a Git worktree to prevent accidental public commits")
+    if _inside_git_worktree(work_dir):
+        raise ValueError("WORK_DIR must stay outside a Git worktree to prevent labels and weights entering public commits")
+    if _inside_git_worktree(pdf_dir) and not allow_public_pdf_dir:
+        raise ValueError("PDF_DIR is inside a Git worktree; pass --allow-public-pdf-dir only for intentionally public PDFs")
     work_dir.mkdir(parents=True, exist_ok=True)
     for name in ("images", "drafts", "labels", "exports", "failures"):
         (work_dir / name).mkdir(exist_ok=True)
@@ -498,6 +502,7 @@ def _parser() -> argparse.ArgumentParser:
     prepare.add_argument("--pdf-dir", type=Path, required=True)
     prepare.add_argument("--work-dir", type=Path, required=True)
     prepare.add_argument("--dpi", type=int, default=200)
+    prepare.add_argument("--allow-public-pdf-dir", action="store_true")
     draft = sub.add_parser("draft", help="run the existing OCR to prefill editable labels")
     draft.add_argument("--work-dir", type=Path, required=True)
     draft.add_argument("--languages", default="ara+eng")
@@ -515,7 +520,7 @@ def main(argv: Iterable[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
         if args.command == "prepare":
-            manifest = prepare_workspace(args.pdf_dir, args.work_dir, args.dpi)
+            manifest = prepare_workspace(args.pdf_dir, args.work_dir, args.dpi, args.allow_public_pdf_dir)
             print(json.dumps({"documents": len(manifest["documents"]), "work_dir": str(args.work_dir.resolve())}, indent=2))
         elif args.command == "draft":
             print(json.dumps(draft_workspace(args.work_dir, args.languages, args.overwrite), indent=2))
