@@ -61,7 +61,23 @@ def plan_regions(page):
         if customer_anchor:add_row(customer_anchor,'customer_name_ar','ar')
     if parsed and not parsed['invoice'].get('payment_method'):
         payment_anchor=next((w for w in words if contains(w['text'],('payment method','payment mthd','payment methd','payment type','طريقة الدفع','نوع الدفع'))),None)
-        if payment_anchor:add_row(payment_anchor,'payment_method','en')
+        if payment_anchor:
+            add_row(payment_anchor,'payment_method','en')
+        else:
+            date_anchor=next((w for w in words if re.search(r'(?:\d{1,2}[-/]\d{1,2}[-/]\d{4}|\d{4}[-/]\d{1,2}[-/]\d{1,2})',normalize(w['text']))),None)
+            if date_anchor:
+                candidates.append(dict(kind='payment_method',original=date_anchor,language='en',
+                    bbox=[page_width*.48,date_anchor['top'],page_width,min(header_limit,date_anchor['top']+h*12)]))
+    if not known_invoice:
+        date_anchor=next((w for w in words if re.search(r'(?:\d{1,2}[-/]\d{1,2}[-/]\d{4}|\d{4}[-/]\d{1,2}[-/]\d{1,2})',normalize(w['text']))),None)
+        if date_anchor:
+            candidates.append(dict(kind='invoice_identifier',original=date_anchor,language='en',
+                bbox=[page_width*.45,max(0,date_anchor['top']-h*4),page_width,date_anchor['top']+h*.5]))
+    if parsed and (totals.get('subtotal') is None or totals.get('net_amount') is None):
+        item_bottom=max((e['bbox'][1]+e['bbox'][3] for item in rows for e in item.get('field_evidence',{}).values()
+                         if isinstance(e,dict)),default=header or hint or page_height*.5)
+        candidates.append(dict(kind='footer_totals',original={},language='en',dpi=400,
+            bbox=[0,item_bottom+h*.5,page_width*.72,min(page_height,item_bottom+max(h*20,page_height*.24))]))
     for w in sorted(words,key=lambda w:(w['top'],w['left'])):
         text=w['text']
         if center(w)[1]<header_limit:
@@ -82,6 +98,18 @@ def plan_regions(page):
         elif header and center(w)[1]>header and re.fullmatch(r'\d+[.]\d*[A-Za-z]',text) and numeric(text) is None:
             add(w,'numeric_cell')
     for item in rows:
+        for missing_key in ('quantity','unit_price','amount'):
+            if item.get(missing_key) is not None:
+                continue
+            heading=next((w for w in words if header_match(w['text'],ALIASES[missing_key]) and abs(center(w)[1]-(header or 0))<h*3),None)
+            row_evidence=next((item.get('field_evidence',{}).get(key) for key in ('amount','unit_price','gross_amount','vat_amount','quantity')
+                               if isinstance(item.get('field_evidence',{}).get(key),dict)),None)
+            if heading and row_evidence:
+                _,ry,_,rh=row_evidence['bbox']
+                original=dict(left=heading['left'],top=ry,width=heading['width'],height=rh,text='')
+                add(original,'numeric_cell')
+                candidates[-1]['bbox']=[heading['left']-h,ry-h*.7,heading['left']+heading['width']+h,ry+rh+h*.7]
+                candidates[-1]['dpi']=400
         if item.get('quantity') is None:
             heading=next((w for w in words if header_match(w['text'],ALIASES['quantity']) and abs(center(w)[1]-(header or 0))<h*3),None)
             row_evidence=item.get('field_evidence',{}).get('amount') or item.get('field_evidence',{}).get('unit_price')
@@ -104,8 +132,8 @@ def plan_regions(page):
                 if hint+h*.5<center(w)[1]<hint+h*3 and abs(center(w)[0]-center(description_label)[0])<h*4 and has_arabic(w['text']) and not re.search('[A-Za-z]',w['text']) and len(w['text'])>=8:
                     add(w,'description','left')
     # Prioritize identifiers and numeric cells before optional text improvements.
-    order={'invoice_identifier':0,'vat_identifier':1,'customer_name_ar':2,'payment_method':3,'date':4,
-           'numeric_cell':5,'supplier_name_ar':6,'supplier_name_en':7,'supplier_name':8,'description':9}
+    order={'invoice_identifier':0,'vat_identifier':1,'customer_name_ar':2,'payment_method':3,'footer_totals':4,'date':5,
+           'numeric_cell':6,'supplier_name_ar':7,'supplier_name_en':8,'supplier_name':9,'description':10}
     candidates=sorted(candidates,key=lambda r:(order[r['kind']],r['bbox'][1],r['bbox'][0]))[:10]
     if incomplete_table and hint is not None:
         footer_y=min((center(w)[1] for w in words if center(w)[1]>hint+2*h and
@@ -189,8 +217,8 @@ def retry_regions(pdf_page,page_payload,model,extract_words,temp_root):
                 cv2.imwrite(str(path),gray)
             else:picture.save(path)
         found=[]
-        predictor=model(region.get('language','ar')) if region['kind'] in {'table_cells','table_cells_en','table_area','table_area_en','supplier_name_ar','supplier_name_en','customer_name_ar','payment_method'} else model()
-        options={'text_det_thresh':.1,'text_det_box_thresh':.2} if region['kind'] in {'numeric_cell','table_cells','table_cells_en','table_area','table_area_en'} else {}
+        predictor=model(region.get('language','ar')) if region['kind'] in {'table_cells','table_cells_en','table_area','table_area_en','footer_totals','supplier_name_ar','supplier_name_en','customer_name_ar','payment_method'} else model()
+        options={'text_det_thresh':.1,'text_det_box_thresh':.2} if region['kind'] in {'numeric_cell','table_cells','table_cells_en','table_area','table_area_en','footer_totals'} else {}
         for result in predictor.predict(str(path),**options):
             for word in extract_words(result):
                 word.update(left=word['left']/scale+x0,top=word['top']/scale+y0,
@@ -217,7 +245,8 @@ def merge_retries(page, retries):
         kind=retry['kind'];candidates=[]
         for word in retry['words']:
             text=word['text'].strip()
-            if word.get('confidence',0)<85:continue
+            confidence_floor=80 if kind in {'supplier_name','supplier_name_ar','supplier_name_en','customer_name_ar','payment_method','description'} else 85
+            if word.get('confidence',0)<confidence_floor:continue
             if kind=='vat_identifier' and re.search(r'(?<!\d)\d{15}(?!\d)',text):
                 candidates.append(word)
             elif kind=='invoice_identifier':
@@ -231,6 +260,8 @@ def merge_retries(page, retries):
                 if abs(center(word)[1]-center(original)[1])<=max(original.get('height',20),word.get('height',20))*.75:
                     candidates.append(word)
             elif kind in {'table_cells','table_area'}:
+                candidates.append(word)
+            elif kind=='footer_totals' and (numeric(text) is not None or re.search(r'[A-Za-z]{3,}',text)):
                 candidates.append(word)
             elif kind in {'table_cells_en','table_area_en'} and (numeric(text) is not None or
                     re.fullmatch(r'(?i)pcs?\.?|sets?|kg|m|ltr|box|roll',text) or

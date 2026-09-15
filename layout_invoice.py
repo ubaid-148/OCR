@@ -272,7 +272,8 @@ def parse_layout(pages,filename,language):
     def name_text(s):
         normalized=normalize(s).strip(' :')
         joined_address=bool(re.search(r'(?i)(?:building|post\s*code|add(?:itional)?\s*no|short\s*adrs|المبنى|الرمز\s*البريدي|الرقم\s*الإضافي)\s*[:#-]?\s*\d',normalized))
-        return (not joined_address and len(normalized)>8 and bool(re.search(r'[A-Za-z\u0600-\u06ff]',normalized)) and
+        identifier_like=bool(number_string(normalized,{15}) or re.search(r'(?i)(?:tax\s*code|taxcode|vat\s*(?:no|number)|الرقم\s*الضريبي)',normalized))
+        return (not joined_address and not identifier_like and len(normalized)>8 and bool(re.search(r'[A-Za-z\u0600-\u06ff]',normalized)) and
                 not contains(normalized,('invoice','date','vat','tax','building no','street','mobile','postal','number','email',
                     'customer details','customer code','cus code','customer no','cr no','commercial registration',
                     'تفاصيل العميل','تفاصيل العملاء','كود العميل','رقم العميل','السجل التجاري','الرقم الضريبي',

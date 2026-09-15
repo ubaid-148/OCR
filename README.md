@@ -84,7 +84,7 @@ model. Crop results are mapped back to the original 200 DPI coordinates.
 Arabic tables with merged headers can additionally receive up to twelve ruled
 cell crops using Arabic recognition when rows, item codes, or totals indicate an incomplete table.
 Header fields can be recovered independently of table detection. Responses carry
-`pipeline_version: 2026-09-visual-layout-v3` to identify this flow.
+`pipeline_version: 2026-09-colab-stable-v4` to identify this flow.
 Typed candidates below 85% confidence are not promoted; raw alternatives remain in the
 OCR output. Set `OCR_TARGETED_RETRY=false` to disable retries. Both recognition
 models are cached after first use. Retry failures preserve the base OCR and flag

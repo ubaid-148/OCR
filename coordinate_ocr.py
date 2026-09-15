@@ -185,7 +185,7 @@ def _extract_pdf(input_path, languages, paddle_language, model, progress=lambda 
             pages.append(page_payload)
             page.close()
     return {
-        "pipeline_version": "2026-09-visual-layout-v3",
+        "pipeline_version": "2026-09-colab-stable-v4",
         "engine": f"PDFium native text / PaddleOCR 3 ({paddle_language})",
         "language": languages, "pages": pages,
     }
