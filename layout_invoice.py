@@ -264,10 +264,15 @@ def parse_layout(pages,filename,language):
                 break
     buyer_candidates=[w for w in words if contains(w['text'],CUSTOMER_SECTION_LABELS)
                       and not contains(w['text'],('signature','seal','company','trading','est','establishment','vat','tax','الضربي','الضريبي','ختم','توقيع'))]
-    buyer=min(buyer_candidates,key=lambda w:(not contains(w['text'],CUSTOMER_NAME_LABELS),y(w),w['left']),default=None)
+    def buyer_rank(w):
+        if contains(w['text'],CUSTOMER_NAME_LABELS):return 0
+        if contains(w['text'],('customer code','cus code','customer no','كود العميل','رقم العميل')):return 2
+        return 1
+    buyer=min(buyer_candidates,key=lambda w:(buyer_rank(w),y(w),w['left']),default=None)
     def name_text(s):
         normalized=normalize(s).strip(' :')
-        return (len(normalized)>8 and bool(re.search(r'[A-Za-z\u0600-\u06ff]',normalized)) and
+        joined_address=bool(re.search(r'(?i)(?:building|post\s*code|add(?:itional)?\s*no|short\s*adrs|المبنى|الرمز\s*البريدي|الرقم\s*الإضافي)\s*[:#-]?\s*\d',normalized))
+        return (not joined_address and len(normalized)>8 and bool(re.search(r'[A-Za-z\u0600-\u06ff]',normalized)) and
                 not contains(normalized,('invoice','date','vat','tax','building no','street','mobile','postal','number','email',
                     'customer details','customer code','cus code','customer no','cr no','commercial registration',
                     'تفاصيل العميل','تفاصيل العملاء','كود العميل','رقم العميل','السجل التجاري','الرقم الضريبي',
@@ -313,7 +318,7 @@ def parse_layout(pages,filename,language):
         w=min(candidates,key=lambda w:(y(w),-w['width']),default=None)
         return keep('supplier.name_ar' if arabic else 'supplier.name_en',w)
     name_ar,name_en=company(True),company(False)
-    pay_label=next((w for w in words if contains(w['text'],('payment method','payment type','طريقة الدفع','نوع الدفع'))),None)
+    pay_label=next((w for w in words if contains(w['text'],('payment method','payment mthd','payment methd','payment type','طريقة الدفع','نوع الدفع'))),None)
     pay=next((w for w in words if contains(w['text'],('cash','card','credit','mada','span','network','بالنقد','نقدي','بطاقة','مدى'))),None)
     if pay_label:
         pay=pay_label if any(token in normalize(pay_label['text']).casefold() for token in ('cash','card','credit','mada','span','بالنقد','نقدي','بطاقة','مدى')) else near(
@@ -321,7 +326,7 @@ def parse_layout(pages,filename,language):
     payment=None
     if pay:
         raw_payment=normalize(pay['text']).strip(' :')
-        raw_payment=re.sub(r'(?i)^(?:payment\s+(?:method|type)|طريقة\s+الدفع|نوع\s+الدفع)\s*[:：]?\s*','',raw_payment).strip(' :')
+        raw_payment=re.sub(r'(?i)^(?:payment\s+(?:method|mthd|methd|type)|طريقة\s+الدفع|نوع\s+الدفع)\s*[:：]?\s*','',raw_payment).strip(' :')
         payment=raw_payment or None
     payment=keep('invoice.payment_method',pay,payment)
     footer=clean[-1];fh,fy=geometry(footer)
@@ -329,21 +334,30 @@ def parse_layout(pages,filename,language):
     item_bottom=max((e['bbox'][1]+e['bbox'][3] for item in items for e in item['field_evidence'].values() if isinstance(e,dict) and e['page']==pages[-1].get('page',len(pages))),default=last_header)
     footer=[w for w in footer if w['top']>item_bottom]
     def total(path,aliases):
-        for label in sorted(footer,key=lambda w:(fy(w),w['left']),reverse=True):
+        matches=[]
+        for label in footer:
             if not contains(label['text'],aliases) and not (path=='totals.vat_amount' and re.fullmatch(r'(?i)VAT\s+\d+(?:\.\d+)?%',label['text'].strip())):continue
             if path=='totals.subtotal' and contains(label['text'],('amount due','net','grand')):continue
             if path=='totals.subtotal' and contains(label['text'],('total vat','vat amount','tax amount','المجموع الضريبة')):continue
             if path=='totals.vat_amount' and contains(label['text'],('without','excl','with vat','بدون','مع الضريبة','شامل')):continue
             candidates=[w for w in footer if w is not label and numeric(w['text']) is not None and w.get('height',fh)>=fh*.5 and abs(fy(w)-fy(label))<=fh*1.2 and (path!='totals.discount' or abs(center(w)[0]-center(label)[0])<fh*12)]
             value=min(candidates,key=lambda w:(abs(fy(w)-fy(label)),abs(center(w)[0]-center(label)[0])),default=None)
-            if value:return keep(path,value,numeric(value['text']))
-        return None
-    subtotal=total('totals.subtotal',('subtotal','gross amount','total amount','total excluding vat','total (excl) vat','before tax',
-        'taxable total','taxable value','total taxable amount','الإجمالي بدون الضريبة','الإجمالي قبل الضريبة','المجموع قبل الضريبة',
+            if value:
+                number=numeric(value['text'])
+                if path=='totals.subtotal' and number==0 and any((item.get('amount') or 0)>0 for item in items):
+                    continue
+                specificity=max((len(re.findall(r'[^\W_]+',alias)) for alias in aliases if contains(label['text'],(alias,))),default=1)
+                matches.append((specificity,fy(label),label,value,number))
+        if not matches:return None
+        _,_,_,value,number=max(matches,key=lambda match:(match[0],match[1]))
+        return keep(path,value,number)
+    subtotal=total('totals.subtotal',('subtotal','gross amount','total amount','total excluding vat','total excl vat','total amt excluding vat','total (excl) vat','before tax',
+        'taxable total','taxable value','total taxable amount','total taxble amount excluding vat','total taxable amount excluding vat',
+        'الإجمالي بدون الضريبة','الإجمالي قبل الضريبة','المجموع قبل الضريبة',
         'إجمالي المبلغ غير شامل الضريبة','إجمالي المبلغ الخاضع للضريبة','إجمالي المبلغ الخاضع','القيمة الخاضعة','المجموع','الجموع'))
     vat=total('totals.vat_amount',('total vat','vat amount','tax amount','total tax','ضريبة القيمة','ضريية القيمة','الضريبة','الضرية',
         'إجمالي ضريبة القيمة المضافة','مجموع ضريبة القيمة المضافة','إجمالي الضريبة'))
-    net=total('totals.net_amount',('grand total','invoice total','amount due','net amount','net total','total with vat','total including vat','including vat',
+    net=total('totals.net_amount',('grand total','invoice total','amount due','net amount','net total','total with vat','total including vat','total amt including vat','including vat',
         'after tax','الإجمالي بما','قيمة الفاتورة مع الضريبة','المبلغ المستحق','إجمالي الفاتورة','الإجمالي شامل','الإجمالي بعد الضريبة',
         'إجمالي المبلغ شامل الضريبة','إجمالي المبلغ المستحق'))
     # A shared TOTAL row places net and VAT under their respective table columns.

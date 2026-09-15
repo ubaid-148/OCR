@@ -45,6 +45,12 @@ class FlowTests(unittest.TestCase):
         self.assertEqual(result["pipeline_version"],"test-flow")
         self.assertEqual(result["parser"],"spatial_fast")
 
+    def test_clean_response_exposes_ai_failure_reason(self):
+        payload={"data":{},"quality":{"needs_review":True,"parser":"spatial_fallback",
+                                       "local_ai_status":"failed","local_ai_error":"timed out"}}
+        result=clean_invoice_response(payload)
+        self.assertEqual(result["local_ai_error"],"timed out")
+
     def test_json_error_preserves_message(self):
         handler = object.__new__(Handler)
         handler.wfile = io.BytesIO()

@@ -27,8 +27,11 @@ def clean_invoice_response(payload):
     needs_review = quality.get('needs_review', True)
     if needs_review and not reasons:
         reasons.append('Check the extracted fields and totals against the PDF.')
-    return {'status': 'needs_review' if needs_review else 'extracted',
+    response={'status': 'needs_review' if needs_review else 'extracted',
             'pipeline_version': payload.get('pipeline_version', 'unknown'),
             'parser': quality.get('parser', 'unknown'),
             'local_ai_status': quality.get('local_ai_status', 'not_reported'),
             'data': result, 'review_notes': list(dict.fromkeys(reasons))}
+    if quality.get('local_ai_status')=='failed' and quality.get('local_ai_error'):
+        response['local_ai_error']=quality['local_ai_error']
+    return response

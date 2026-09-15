@@ -19,8 +19,8 @@ class PerformanceFlowTests(unittest.TestCase):
         self.assertTrue(UPLOAD_SLOT.acquire(blocking=False))
         UPLOAD_SLOT.release()
 
-    def test_fast_default_and_progress_ui(self):
+    def test_accuracy_default_and_progress_ui(self):
         body = page().decode()
-        self.assertLess(body.index('value="fast"'), body.index('value="auto"'))
+        self.assertLess(body.index('value="auto"'), body.index('value="fast"'))
         self.assertIn('/app.js', body)
         self.assertIn('aria-live="polite"', body)

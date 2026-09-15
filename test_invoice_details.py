@@ -47,7 +47,7 @@ class InvoiceDetailsTests(unittest.TestCase):
                  ('نسبة الضريبة',220),('مبلغ الضريبة',130),('الإجمالي شامل الضريبة',20)]
         words=[box(text,x,300) for text,x in headers]
         rows=[
-            [('A-1012',1200),('منتج تجريبي أول',900),('PCS',760),('2',650),('10.00',520),('0.00',420),('20.00',300),('15%',220),('3.00',130),('23.00',20)],
+            [('A-1012',1200),('منتج تجريبي أول',900),('PCS',760),('2',650),('10.00',520),('0.00',420),('10.00',300),('15%',220),('1.50',130),('23.00',20)],
             [('A-1018',1200),('منتج تجريبي ثان',900),('PCS',760),('1',650),('20.00',520),('0.00',420),('20.00',300),('15%',220),('3.00',130),('23.00',20)],
             [('A-5001',1200),('منتج تجريبي ثالث',900),('PCS',760),('1',650),('10.00',520),('0.00',420),('10.00',300),('15%',220),('1.50',130),('11.50',20)],
         ]
@@ -75,6 +75,7 @@ class InvoiceDetailsTests(unittest.TestCase):
         self.assertEqual(data['customer']['vat_number'],'300000000000003')
         self.assertEqual([item['item_code'] for item in data['items']],['A-1012','A-1018','A-5001'])
         self.assertEqual([item['quantity'] for item in data['items']],[2,1,1])
+        self.assertEqual(data['items'][0]['amount'],10)
         self.assertEqual(data['totals']['subtotal'],50)
         self.assertEqual(data['totals']['vat_amount'],7.5)
         self.assertEqual(data['totals']['net_amount'],57.5)

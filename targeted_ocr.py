@@ -5,7 +5,8 @@ from pathlib import Path
 from invoice_formatter import contains, center, has_arabic, normalize
 from document_regions import invoice_words
 from layout_invoice import (
-    ALIASES, DATE_LABELS, INVOICE_LABELS, header_hint, header_match, numeric, parse_layout, table,
+    ALIASES, CUSTOMER_SECTION_LABELS, DATE_LABELS, INVOICE_LABELS,
+    header_hint, header_match, numeric, parse_layout, table,
 )
 
 
@@ -40,19 +41,39 @@ def plan_regions(page):
         if part=='right':x0=x0+w['width']*.38
         if part=='identifier':x0=x0+w['width']*.60
         candidates.append(dict(bbox=[x0-h*.2,y0-h*.25,x1+h*.2,y1+h*.25],kind=kind,original=w))
+    def add_row(w,kind,language='en'):
+        candidates.append(dict(bbox=[0,w['top']-h*.6,page_width,w['top']+w['height']+h*.6],
+                               kind=kind,original=w,language=language))
+    if parsed and not parsed['supplier'].get('name_en'):
+        name_anchor=next((w for w in words if contains(w['text'],('مؤسسة','مؤسسه','شركة')) and center(w)[1]<header_limit*.5),None)
+        if name_anchor:
+            cluster=[w for w in words if abs(center(w)[1]-center(name_anchor)[1])<h]
+            candidates.append(dict(kind='supplier_name_en',original=name_anchor,language='en',
+                bbox=[max(0,min(w['left'] for w in cluster)-h),max(0,min(w['top'] for w in cluster)-h*.4),
+                      min(page_width,max(w['left']+w['width'] for w in cluster)+h),
+                      min(page_height,max(w['top']+w['height'] for w in cluster)+h*4)]))
+    customer_value=parsed.get('customer',{}).get('name') if parsed else None
+    bad_customer=(not customer_value or contains(customer_value,CUSTOMER_SECTION_LABELS) or
+                  re.search(r'(?i)(?:building|post\s*code|add\s*no|المبنى|الرمز\s*البريدي)\s*\d',customer_value))
+    if bad_customer:
+        customer_anchor=next((w for w in words if contains(w['text'],CUSTOMER_SECTION_LABELS) and
+                              not contains(w['text'],('customer code','cus code','customer no','vat','tax','كود العميل','رقم العميل','الضريبي'))),None)
+        if customer_anchor:add_row(customer_anchor,'customer_name_ar','ar')
+    if parsed and not parsed['invoice'].get('payment_method'):
+        payment_anchor=next((w for w in words if contains(w['text'],('payment method','payment mthd','payment methd','payment type','طريقة الدفع','نوع الدفع'))),None)
+        if payment_anchor:add_row(payment_anchor,'payment_method','en')
     for w in sorted(words,key=lambda w:(w['top'],w['left'])):
         text=w['text']
         if center(w)[1]<header_limit:
             if not known_invoice and (contains(text,INVOICE_LABELS) or 'رقم' in text and 'فاتور' in text) and not re.search(r'\b[A-Za-z]+[-/]\d+',text):
-                add(w,'invoice_identifier','identifier')
-                # Arabic forms can place the value to the left of its label.
-                if not re.search('[A-Za-z]',text):add(w,'invoice_identifier','left')
-            elif contains(text,('vat','رقم ضريبة','رقم ضريبه','الرقم الضريبي')) and not re.search(r'(?<!\d)\d{15}(?!\d)',text) and not re.search(r'%|amount|without|including',text,re.I):
-                add(w,'vat_identifier','right')
+                # Bilingual forms commonly place the value in a separate box to the label's left.
+                add_row(w,'invoice_identifier','en')
+            elif contains(text,('vat','tax code','رقم ضريبة','رقم ضريبه','الرقم الضريبي')) and not re.search(r'(?<!\d)\d{15}(?!\d)',text) and not re.search(r'%|amount|without|including',text,re.I):
+                add_row(w,'vat_identifier','en')
             elif any(t in text for t in ('ضربي','الضري','الضرب')) and not re.search(r'\d{15}',text):
-                add(w,'vat_identifier','whole')
+                add_row(w,'vat_identifier','en')
             elif contains(text,DATE_LABELS) and not contains(text,('supply date','date of supply','تاريخ التوريد')) and not re.search(r'\d{4}',text):
-                add(w,'date','whole')
+                add_row(w,'date','en')
             elif has_arabic(text) and re.search('[A-Za-z]',text) and any(t in text for t in ('شركة','مؤسسة','مؤسسه')) and len(text)>25:
                 add(w,'supplier_name','left')
         if header and center(w)[1]>header and numeric(text) is not None and w.get('confidence',100)<80 and re.search(r'\d[.]\d',text):
@@ -83,8 +104,9 @@ def plan_regions(page):
                 if hint+h*.5<center(w)[1]<hint+h*3 and abs(center(w)[0]-center(description_label)[0])<h*4 and has_arabic(w['text']) and not re.search('[A-Za-z]',w['text']) and len(w['text'])>=8:
                     add(w,'description','left')
     # Prioritize identifiers and numeric cells before optional text improvements.
-    order={'numeric_cell':0,'invoice_identifier':1,'vat_identifier':2,'supplier_name_ar':3,'date':4,'supplier_name':5,'description':6}
-    candidates=sorted(candidates,key=lambda r:(order[r['kind']],r['bbox'][1],r['bbox'][0]))[:6]
+    order={'invoice_identifier':0,'vat_identifier':1,'customer_name_ar':2,'payment_method':3,'date':4,
+           'numeric_cell':5,'supplier_name_ar':6,'supplier_name_en':7,'supplier_name':8,'description':9}
+    candidates=sorted(candidates,key=lambda r:(order[r['kind']],r['bbox'][1],r['bbox'][0]))[:10]
     if incomplete_table and hint is not None:
         footer_y=min((center(w)[1] for w in words if center(w)[1]>hint+2*h and
                       (normalize(w['text']).strip(' :').casefold() in {'total','مجموع'} or contains(w['text'],(
@@ -92,8 +114,9 @@ def plan_regions(page):
                           'total vat','before tax','after tax','الإجمالي قبل الضريبة','الإجمالي بعد الضريبة',
                           'إجمالي ضريبة القيمة المضافة','إجمالي المبلغ')))),default=None)
         table_end=footer_y-h*.4 if footer_y is not None else min(page_height*.85,hint+max(12*h,page_height*.25))
+        arabic_table=any(has_arabic(w['text']) and hint-3*h<center(w)[1]<table_end for w in words)
         candidates.insert(0,dict(bbox=[0,hint-h,page_width,max(hint+4*h,table_end)],kind='table_cells',original={},
-                                 language='en' if any(contains(w['text'],('unit price',)) for w in words) else 'ar'))
+                                 language='ar' if arabic_table else 'en'))
     return candidates
 
 
@@ -127,14 +150,25 @@ def retry_regions(pdf_page,page_payload,model,extract_words,temp_root):
         if region['kind']=='table_cells':
             cells=grid_cells(pdf_page,region,dpi,page_width,page_height)
             if len(cells)<4:
-                regions.append(dict(region,kind='table_area'))
+                primary=dict(region,kind='table_area',dpi=400)
+                regions.append(primary)
+                if region.get('language')=='ar':
+                    secondary=dict(primary,kind='table_area_en',language='en',bbox=list(primary['bbox']))
+                    secondary['bbox'][1]+=(primary['bbox'][3]-primary['bbox'][1])*.22
+                    regions.append(secondary)
                 continue
+            for cell in cells:cell['dpi']=400
             if region.get('language')=='en':
                 h=region['bbox'][3]-region['bbox'][1]
                 for cell in cells:
                     cell['bbox'][1]=region['bbox'][1]+h*.45
                     cell['enhance']=True
             regions.extend(cells)
+            if region.get('language')=='ar':
+                for cell in cells:
+                    secondary=dict(cell,kind='table_cells_en',language='en',bbox=list(cell['bbox']))
+                    secondary['bbox'][1]+=max(0,(secondary['bbox'][3]-secondary['bbox'][1])*.22)
+                    regions.append(secondary)
         else:regions.append(region)
     for i,region in enumerate(regions):
         x0,y0,x1,y1=region['bbox']
@@ -155,8 +189,8 @@ def retry_regions(pdf_page,page_payload,model,extract_words,temp_root):
                 cv2.imwrite(str(path),gray)
             else:picture.save(path)
         found=[]
-        predictor=model(region.get('language','ar')) if region['kind'] in {'table_cells','table_area','supplier_name_ar'} else model()
-        options={'text_det_thresh':.1,'text_det_box_thresh':.2} if region['kind'] in {'numeric_cell','table_cells','table_area'} else {}
+        predictor=model(region.get('language','ar')) if region['kind'] in {'table_cells','table_cells_en','table_area','table_area_en','supplier_name_ar','supplier_name_en','customer_name_ar','payment_method'} else model()
+        options={'text_det_thresh':.1,'text_det_box_thresh':.2} if region['kind'] in {'numeric_cell','table_cells','table_cells_en','table_area','table_area_en'} else {}
         for result in predictor.predict(str(path),**options):
             for word in extract_words(result):
                 word.update(left=word['left']/scale+x0,top=word['top']/scale+y0,
@@ -198,6 +232,10 @@ def merge_retries(page, retries):
                     candidates.append(word)
             elif kind in {'table_cells','table_area'}:
                 candidates.append(word)
+            elif kind in {'table_cells_en','table_area_en'} and (numeric(text) is not None or
+                    re.fullmatch(r'(?i)pcs?\.?|sets?|kg|m|ltr|box|roll',text) or
+                    re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9/.* -]{2,}',text)):
+                candidates.append(word)
             elif kind=='date' and re.search(r'(?:\d{1,2}[-/]\d{1,2}[-/]\d{4}|\d{4}[-/]\d{1,2}[-/]\d{1,2})',text):
                 date=re.search(r'(?:\d{1,2}[-/]\d{1,2}[-/]\d{4}|\d{4}[-/]\d{1,2}[-/]\d{1,2})',text)[0]
                 time=re.search(r'\d{2}:\d{2}:\d{2}',text)
@@ -208,6 +246,14 @@ def merge_retries(page, retries):
                 candidates.append(word)
             elif kind=='supplier_name_ar' and has_arabic(text) and contains(text,('مؤسسة','مؤسسه','شركة')) and len(text)>12:
                 candidates.append(word)
+            elif kind=='supplier_name_en' and re.search(r'[A-Za-z]{3,}',text) and contains(text,('company','trading','est','establishment','co')):
+                candidates.append(word)
+            elif kind=='customer_name_ar' and has_arabic(text) and contains(text,('مؤسسة','مؤسسه','شركة','مقاولات')) and len(text)>12:
+                candidates.append(word)
+            elif kind=='payment_method' and contains(text,('cash','card','credit','mada','span','network')):
+                candidates.append(word)
+        if kind in {'numeric_cell','vat_identifier','invoice_identifier'} and len(candidates)>1:
+            candidates=[min(candidates,key=lambda word:abs(center(word)[0]-center(retry['original'])[0])+abs(center(word)[1]-center(retry['original'])[1])*3)]
         if kind in {'numeric_cell','vat_identifier','invoice_identifier'} and len(candidates)!=1:
             continue
         if kind=='numeric_cell' and candidates:
