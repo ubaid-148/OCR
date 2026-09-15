@@ -10,7 +10,7 @@ the application uses its deterministic spatial parser.
 - Python 3.11+
 - Tesseract OCR installed and available on `PATH`
 - Ollama running locally (optional, used for AI parsing)
-- The Ollama model configured by `OLLAMA_MODEL` (default: `qwen2.5:3b`)
+- The Ollama model configured by `OLLAMA_MODEL` (Colab accuracy default: `qwen2.5:7b`)
 
 ## Setup
 
@@ -58,8 +58,8 @@ mapped separately; nearby dates and VAT identifiers cannot become invoice number
 Selected faint English table crops use 400 DPI with contrast and stroke thickening.
 This does not guarantee recovery: uncertain fields remain null and require review.
 
-Uploads default to Fast (OCR and validation). Balanced adds optional AI review;
-Colab limits its wait to 20 seconds and generation to 2048 tokens. The page shows
+Uploads default to Accuracy (OCR, validation, and AI review when needed). Fast explicitly skips AI;
+Colab allows 90 seconds and up to 3072 generated tokens for the accuracy review. The page shows
 the current OCR stage and elapsed time and displays formatted JSON without navigation.
 Concurrent uploads receive HTTP 429 instead of accumulating in the native OCR queue.
 Colab loads Arabic and English OCR models during server startup, so model download
@@ -81,10 +81,10 @@ region. Detection is heuristic: missing fields still need the unobstructed sourc
 Uncertain identifiers, malformed numeric cells and mixed-script text can receive
 up to six targeted crops per page at 300 DPI using the English Paddle recognition
 model. Crop results are mapped back to the original 200 DPI coordinates.
-Arabic tables with merged headers can additionally receive up to eight ruled
-cell crops using Arabic recognition, even when the initial pass finds no rows.
+Arabic tables with merged headers can additionally receive up to twelve ruled
+cell crops using Arabic recognition when rows, item codes, or totals indicate an incomplete table.
 Header fields can be recovered independently of table detection. Responses carry
-`pipeline_version: 2026-09-arabic-grid` to identify this flow.
+`pipeline_version: 2026-09-arabic-accuracy-v2` to identify this flow.
 Typed candidates below 85% confidence are not promoted; raw alternatives remain in the
 OCR output. Set `OCR_TARGETED_RETRY=false` to disable retries. Both recognition
 models are cached after first use. Retry failures preserve the base OCR and flag

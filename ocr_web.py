@@ -94,7 +94,7 @@ button:hover {{ background:#0f4b3d; }}
 <form method="post" enctype="multipart/form-data">
 <label>PDF file<input type="file" name="pdf" accept="application/pdf,.pdf" required></label>
 <label>Languages<select name="languages"><option value="eng+ara">English + Arabic</option><option value="eng">English only</option><option value="ara">Arabic only</option><option value="eng+urd">English + Urdu</option></select></label>
-<label>Processing<select name="mode"><option value="fast">Fast (OCR + validation)</option><option value="auto">Balanced (additional AI review; slower)</option></select></label>
+<label>Processing<select name="mode"><option value="auto">Accuracy (OCR + AI review when needed)</option><option value="fast">Fast (OCR + validation only)</option></select></label>
 <label>Output<select name="format"><option value="invoice">Invoice JSON</option><option value="invoice_debug">Detailed invoice JSON (debug)</option><option value="json">Raw OCR JSON (technical boxes)</option></select></label>
 <p class="hint">PaddleOCR uses Arabic recognition for Arabic/Urdu selections; it also handles Latin text and numbers.</p>
 <button type="submit">Run PaddleOCR</button>

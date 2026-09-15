@@ -40,3 +40,41 @@ class InvoiceDetailsTests(unittest.TestCase):
         add_printed_details(data,[dict(words=words)])
         self.assertEqual(data['bank_details']['account_no'],'001234567890')
         self.assertNotIn('notes',data)
+
+    def test_arabic_customer_invoice_labels_and_three_rows(self):
+        headers=[('رقم الصنف',1200),('اسم الصنف',950),('الوحدة',760),('الكمية',650),
+                 ('سعر الوحدة',520),('الخصم',420),('المبلغ الخاضع للضريبة',300),
+                 ('نسبة الضريبة',220),('مبلغ الضريبة',130),('الإجمالي شامل الضريبة',20)]
+        words=[box(text,x,300) for text,x in headers]
+        rows=[
+            [('A-1012',1200),('منتج تجريبي أول',900),('PCS',760),('2',650),('10.00',520),('0.00',420),('20.00',300),('15%',220),('3.00',130),('23.00',20)],
+            [('A-1018',1200),('منتج تجريبي ثان',900),('PCS',760),('1',650),('20.00',520),('0.00',420),('20.00',300),('15%',220),('3.00',130),('23.00',20)],
+            [('A-5001',1200),('منتج تجريبي ثالث',900),('PCS',760),('1',650),('10.00',520),('0.00',420),('10.00',300),('15%',220),('1.50',130),('11.50',20)],
+        ]
+        for index,row in enumerate(rows):
+            words.extend(box(text,x,360+index*55) for text,x in row)
+        words += [
+            box('شركة المثال التجارية',900,20),
+            box('الرقم الضريبي للمورد: 310000000000003',850,70),
+            box('مسلسل الفاتورة: 1234567890',850,110),
+            box('تاريخ إصدار الفاتورة: 01/01/2026 10:20:30',750,145),
+            box('كود العميل: 123456',100,190),
+            box('مؤسسة المثال للمقاولات العامة',350,190),
+            box('الرقم الضريبي للعميل: 300000000000003',300,230),
+            box('طريقة الدفع: Span Card - Mada',800,260),
+            box('الإجمالي قبل الضريبة',700,570),box('50.00',1000,570),
+            box('إجمالي ضريبة القيمة المضافة',700,610),box('7.50',1000,610),
+            box('إجمالي المبلغ شامل الضريبة',700,650),box('57.50',1000,650),
+        ]
+        data=parse_layout([dict(words=words)],'example-ar.pdf','eng+ara')
+        self.assertEqual(data['invoice']['invoice_number'],'1234567890')
+        self.assertEqual(data['invoice']['date'],'01/01/2026')
+        self.assertEqual(data['invoice']['time'],'10:20:30')
+        self.assertEqual(data['invoice']['payment_method'],'Span Card - Mada')
+        self.assertEqual(data['customer']['name'],'مؤسسة المثال للمقاولات العامة')
+        self.assertEqual(data['customer']['vat_number'],'300000000000003')
+        self.assertEqual([item['item_code'] for item in data['items']],['A-1012','A-1018','A-5001'])
+        self.assertEqual([item['quantity'] for item in data['items']],[2,1,1])
+        self.assertEqual(data['totals']['subtotal'],50)
+        self.assertEqual(data['totals']['vat_amount'],7.5)
+        self.assertEqual(data['totals']['net_amount'],57.5)

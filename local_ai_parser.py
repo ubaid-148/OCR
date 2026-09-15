@@ -34,10 +34,11 @@ INVOICE_SCHEMA = {
         "items": {"type": "array", "items": {"type": "object", "properties": {
             "line_no": {"type": "integer"}, "item_code": {"type": ["string", "null"]},
             "description": {"type": ["string", "null"]}, "quantity": {"type": ["number", "null"]},
+            "unit": {"type": ["string", "null"]},
             "unit_price": {"type": ["number", "null"]}, "amount": {"type": ["number", "null"]},
             "vat_amount": {"type": ["number", "null"]}, "discount": {"type": ["number", "null"]},
             "gross_amount": {"type": ["number", "null"]}},
-            "required": ["line_no", "item_code", "description", "quantity", "unit_price", "amount"]}},
+            "required": ["line_no", "item_code", "description", "quantity", "unit", "unit_price", "amount"]}},
         "totals": {"type": "object", "properties": {
             "subtotal": {"type": ["number", "null"]}, "discount": {"type": ["number", "null"]},
             "vat_rate": {"type": ["number", "null"]}, "vat_amount": {"type": ["number", "null"]},
@@ -142,8 +143,11 @@ def _ask_ollama(pages: list[dict[str, Any]]) -> dict[str, Any]:
     prompt = (
         "Extract this invoice into the required JSON schema. Each OCR box is [x,y,width,height,text] on a 0-1000 page grid. "
         "Layouts and label names vary: Buyer/Bill To/Customer are aliases; Qty/Quantity and Rate/Unit Price are aliases. "
-        "Item codes are optional; preserve every item row, decimal quantities, and full alphanumeric invoice IDs. "
-        "Distinguish pre-tax line value from line total including tax. Do not treat addresses or VAT IDs as amounts. "
+        "Arabic invoice serial labels include مسلسل الفاتورة and رقم مسلسل الفاتورة; issue-date labels include تاريخ إصدار الفاتورة. "
+        "كود العميل means customer code, never customer name; find the actual company/person beside an اسم العميل or customer section. "
+        "Item codes are optional; preserve every visible item row, including adjacent rows with similar descriptions, decimal quantities, units, and full alphanumeric invoice IDs. "
+        "For each row, amount is the whole-row pre-tax value, normally quantity multiplied by unit_price minus discount; it is not the unit price when quantity is greater than one. "
+        "Distinguish that pre-tax line amount from line total including tax (gross_amount). Do not treat addresses or VAT IDs as amounts. "
         "Understand English and Arabic label aliases and table geometry. Preserve leading zeros in codes and VAT numbers. "
         "Never invent a value: return null when it is absent or uncertain. Distinguish supplier VAT from customer VAT by labels and position. "
         "Use arithmetic only to disambiguate OCR candidates, not to fabricate missing values. OCR:\n"

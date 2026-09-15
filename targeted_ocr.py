@@ -2,16 +2,17 @@
 import re
 from contextlib import closing
 from pathlib import Path
-from invoice_formatter import contains, center, has_arabic
+from invoice_formatter import contains, center, has_arabic, normalize
 from document_regions import invoice_words
-from layout_invoice import table, numeric, header_hint, ALIASES, parse_layout
+from layout_invoice import (
+    ALIASES, DATE_LABELS, INVOICE_LABELS, header_hint, header_match, numeric, parse_layout, table,
+)
 
 
 def plan_regions(page):
     words,_=invoice_words(page)
     h=sorted([w.get('height',20) for w in words])[len(words)//2] if words else 20
     rows,header,_=table(words)
-    incomplete_table=not rows or any(item.get('quantity') is None for item in rows)
     hint=header_hint(words)
     if header is None:
         header=hint
@@ -20,6 +21,13 @@ def plan_regions(page):
     header_limit=header if header is not None else page_height*.5
     candidates=[]
     parsed=parse_layout([page],'','')
+    totals=parsed.get('totals',{}) if parsed else {}
+    amounts=[item.get('amount') for item in rows]
+    subtotal=totals.get('subtotal')
+    subtotal_mismatch=(subtotal is not None and amounts and all(value is not None for value in amounts)
+                       and abs(sum(amounts)-subtotal)>.02)
+    incomplete_table=(not rows or any(item.get('quantity') is None or item.get('item_code') is None for item in rows)
+                      or subtotal_mismatch or (parsed is not None and (subtotal is None or totals.get('net_amount') is None)))
     known_invoice=parsed and parsed['invoice'].get('invoice_number')
     if parsed and not parsed['supplier'].get('name_ar'):
         name_anchor=next((w for w in words if contains(w['text'],('مؤسسة','مؤسسه','شركة')) and center(w)[1]<header_limit*.5),None)
@@ -35,7 +43,7 @@ def plan_regions(page):
     for w in sorted(words,key=lambda w:(w['top'],w['left'])):
         text=w['text']
         if center(w)[1]<header_limit:
-            if not known_invoice and (contains(text,('invoice no','invoice number','inv no','رقم الفاتورة')) or 'رقم' in text and 'فاتور' in text) and not re.search(r'\b[A-Za-z]+[-/]\d+',text):
+            if not known_invoice and (contains(text,INVOICE_LABELS) or 'رقم' in text and 'فاتور' in text) and not re.search(r'\b[A-Za-z]+[-/]\d+',text):
                 add(w,'invoice_identifier','identifier')
                 # Arabic forms can place the value to the left of its label.
                 if not re.search('[A-Za-z]',text):add(w,'invoice_identifier','left')
@@ -43,7 +51,7 @@ def plan_regions(page):
                 add(w,'vat_identifier','right')
             elif any(t in text for t in ('ضربي','الضري','الضرب')) and not re.search(r'\d{15}',text):
                 add(w,'vat_identifier','whole')
-            elif 'تاريخ' in text and not re.search(r'\d{4}',text):
+            elif contains(text,DATE_LABELS) and not contains(text,('supply date','date of supply','تاريخ التوريد')) and not re.search(r'\d{4}',text):
                 add(w,'date','whole')
             elif has_arabic(text) and re.search('[A-Za-z]',text) and any(t in text for t in ('شركة','مؤسسة','مؤسسه')) and len(text)>25:
                 add(w,'supplier_name','left')
@@ -54,7 +62,7 @@ def plan_regions(page):
             add(w,'numeric_cell')
     for item in rows:
         if item.get('quantity') is None:
-            heading=next((w for w in words if contains(w['text'],ALIASES['quantity']) and abs(center(w)[1]-(header or 0))<h*3),None)
+            heading=next((w for w in words if header_match(w['text'],ALIASES['quantity']) and abs(center(w)[1]-(header or 0))<h*3),None)
             row_evidence=item.get('field_evidence',{}).get('amount') or item.get('field_evidence',{}).get('unit_price')
             if heading and row_evidence:
                 _,ry,_,rh=row_evidence['bbox']
@@ -69,7 +77,7 @@ def plan_regions(page):
                 w=next((w for w in words if [w.get(k) for k in ('left','top','width','height')]==evidence['bbox']),None)
                 if w:add(w,'description','left')
     if incomplete_table and hint is not None:
-        description_label=next((w for w in words if contains(w['text'],ALIASES['description']) and abs(center(w)[1]-hint)<h*2),None)
+        description_label=next((w for w in words if header_match(w['text'],ALIASES['description']) and abs(center(w)[1]-hint)<h*2),None)
         if description_label:
             for w in words:
                 if hint+h*.5<center(w)[1]<hint+h*3 and abs(center(w)[0]-center(description_label)[0])<h*4 and has_arabic(w['text']) and not re.search('[A-Za-z]',w['text']) and len(w['text'])>=8:
@@ -78,7 +86,14 @@ def plan_regions(page):
     order={'numeric_cell':0,'invoice_identifier':1,'vat_identifier':2,'supplier_name_ar':3,'date':4,'supplier_name':5,'description':6}
     candidates=sorted(candidates,key=lambda r:(order[r['kind']],r['bbox'][1],r['bbox'][0]))[:6]
     if incomplete_table and hint is not None:
-        candidates.insert(0,dict(bbox=[0,hint-h,page_width,hint+3*h],kind='table_cells',original={},language='en' if any(contains(w['text'],('unit price',)) for w in words) else 'ar'))
+        footer_y=min((center(w)[1] for w in words if center(w)[1]>hint+2*h and
+                      (normalize(w['text']).strip(' :').casefold() in {'total','مجموع'} or contains(w['text'],(
+                          'subtotal','grand total','invoice total','total excluding vat','total including vat',
+                          'total vat','before tax','after tax','الإجمالي قبل الضريبة','الإجمالي بعد الضريبة',
+                          'إجمالي ضريبة القيمة المضافة','إجمالي المبلغ')))),default=None)
+        table_end=footer_y-h*.4 if footer_y is not None else min(page_height*.85,hint+max(12*h,page_height*.25))
+        candidates.insert(0,dict(bbox=[0,hint-h,page_width,max(hint+4*h,table_end)],kind='table_cells',original={},
+                                 language='en' if any(contains(w['text'],('unit price',)) for w in words) else 'ar'))
     return candidates
 
 
@@ -100,7 +115,7 @@ def grid_cells(pdf_page,region,dpi,page_width,page_height):
         if not groups or x-groups[-1][-1]>4:groups.append([x])
         else:groups[-1].append(x)
     edges=[sum(g)/len(g)/factor for g in groups]
-    return [dict(kind='table_cells',bbox=[a+2,y0,b-2,y1],original={},language=region.get('language','ar')) for a,b in zip(edges,edges[1:]) if b-a>15][:8]
+    return [dict(kind='table_cells',bbox=[a+2,y0,b-2,y1],original={},language=region.get('language','ar')) for a,b in zip(edges,edges[1:]) if b-a>15][:12]
 
 
 def retry_regions(pdf_page,page_payload,model,extract_words,temp_root):
@@ -111,6 +126,9 @@ def retry_regions(pdf_page,page_payload,model,extract_words,temp_root):
     for region in plan_regions(page_payload):
         if region['kind']=='table_cells':
             cells=grid_cells(pdf_page,region,dpi,page_width,page_height)
+            if len(cells)<4:
+                regions.append(dict(region,kind='table_area'))
+                continue
             if region.get('language')=='en':
                 h=region['bbox'][3]-region['bbox'][1]
                 for cell in cells:
@@ -137,8 +155,8 @@ def retry_regions(pdf_page,page_payload,model,extract_words,temp_root):
                 cv2.imwrite(str(path),gray)
             else:picture.save(path)
         found=[]
-        predictor=model(region.get('language','ar')) if region['kind'] in {'table_cells','supplier_name_ar'} else model()
-        options={'text_det_thresh':.1,'text_det_box_thresh':.2} if region['kind']=='numeric_cell' else {}
+        predictor=model(region.get('language','ar')) if region['kind'] in {'table_cells','table_area','supplier_name_ar'} else model()
+        options={'text_det_thresh':.1,'text_det_box_thresh':.2} if region['kind'] in {'numeric_cell','table_cells','table_area'} else {}
         for result in predictor.predict(str(path),**options):
             for word in extract_words(result):
                 word.update(left=word['left']/scale+x0,top=word['top']/scale+y0,
@@ -178,10 +196,10 @@ def merge_retries(page, retries):
                 original=retry['original']
                 if abs(center(word)[1]-center(original)[1])<=max(original.get('height',20),word.get('height',20))*.75:
                     candidates.append(word)
-            elif kind=='table_cells':
+            elif kind in {'table_cells','table_area'}:
                 candidates.append(word)
-            elif kind=='date' and re.search(r'\d{1,2}[-/]\d{1,2}[-/]\d{4}',text):
-                date=re.search(r'\d{1,2}[-/]\d{1,2}[-/]\d{4}',text)[0]
+            elif kind=='date' and re.search(r'(?:\d{1,2}[-/]\d{1,2}[-/]\d{4}|\d{4}[-/]\d{1,2}[-/]\d{1,2})',text):
+                date=re.search(r'(?:\d{1,2}[-/]\d{1,2}[-/]\d{4}|\d{4}[-/]\d{1,2}[-/]\d{1,2})',text)[0]
                 time=re.search(r'\d{2}:\d{2}:\d{2}',text)
                 candidates.append(dict(word,text=date,raw_text=text,raw_time=time[0] if time else None))
             elif kind=='description' and re.search(r'[A-Za-z]{3,}',text):
