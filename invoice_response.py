@@ -8,7 +8,7 @@ def clean_invoice_response(payload):
         return {key: value.get(key) for key in keys}
     result = select(data, ('source_filename',))
     result['supplier'] = select(data.get('supplier') or {}, ('name_ar', 'name_en', 'vat_number'))
-    result['invoice'] = select(data.get('invoice') or {}, ('invoice_number', 'date', 'time', 'payment_method'))
+    result['invoice'] = select(data.get('invoice') or {}, ('invoice_number', 'date', 'date_of_supply', 'time', 'payment_method'))
     result['customer'] = select(data.get('customer') or {}, ('name', 'vat_number', 'address'))
     result['items'] = [select(item, ('item_code', 'description', 'quantity', 'unit', 'unit_price', 'amount', 'vat_amount', 'gross_amount'))
                        for item in data.get('items', [])]

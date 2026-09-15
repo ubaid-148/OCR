@@ -1,6 +1,6 @@
 import unittest
 
-from layout_invoice import table, numeric, parse_layout
+from layout_invoice import table, numeric, parse_layout, table_retry_reasons
 from invoice_formatter import money
 from local_ai_parser import _validate, _compact_ocr
 
@@ -109,6 +109,50 @@ class LayoutInvoiceTests(unittest.TestCase):
         validation, quality = _validate(data)
         self.assertFalse(validation["vat_valid"])
         self.assertTrue(quality["needs_review"])
+
+    def test_targeted_cell_headers_override_scrambled_merged_headers(self):
+        words=[box(t,x,300) for t,x in [
+            ('Tax Amount Quantity',130),('Taxable Amount',390),('Unit Price',540),
+            ('Description',850),('Item Code',1120),('Including VAT',20),
+        ]]
+        corrected=[('VAT Amount',130),('Taxable Amount',390),('Unit Price',540),
+                   ('Quantity',650),('Unit',750),('Description',850),('Item Code',1120),
+                   ('Including VAT',20)]
+        for text_value,x in corrected:
+            word=box(text_value,x,300);word.update(source='targeted_ocr',retry_kind='table_cells_en')
+            words.append(word)
+        rows=[
+            [('34.02',20),('2.22',130),('14.79',390),('14.79',540),('2',650),('PCS',750),('Oil HELIX 15/40',850),('1212',1120)],
+            [('58.01',20),('7.57',130),('50.44',390),('50.44',540),('1',650),('PCS',750),('Oil HELIX 4L',850),('1218',1120)],
+            [('17.01',20),('2.22',130),('14.79',390),('14.79',540),('1',650),('PCS',750),('Toyota filter D4',850),('5007',1120)],
+        ]
+        for index,row in enumerate(rows):
+            words.extend(box(text_value,x,360+index*45) for text_value,x in row)
+        parsed,header,h=table(words)
+        self.assertEqual([row['item_code'] for row in parsed],['1212','1218','5007'])
+        self.assertEqual([row['quantity'] for row in parsed],[2,1,1])
+        self.assertEqual([row['amount'] for row in parsed],[14.79,50.44,14.79])
+        self.assertEqual([row['vat_amount'] for row in parsed],[2.22,7.57,2.22])
+        self.assertEqual([row['gross_amount'] for row in parsed],[34.02,58.01,17.01])
+        self.assertEqual(table_retry_reasons(words,parsed,header,h),[])
+
+    def test_mixed_arabic_description_uses_rtl_reading_order(self):
+        words=[box(t,x,300) for t,x in [('Item Code',1150),('Description',850),('Unit',700),('Qty',600),('Unit Price',450),('Amount',300)]]
+        words += [box(t,x,360) for t,x in [('1212',1150),('زيت شل هيلكس',900),('HELIX 15/40',800),('PCS',700),('2',600),('14.79',450),('14.79',300)]]
+        row=table(words)[0][0]
+        self.assertEqual(row['description'],'زيت شل هيلكس HELIX 15/40')
+
+    def test_per_unit_printed_columns_validate_without_rewriting_source(self):
+        data=dict(supplier={},customer={},invoice={},items=[
+            dict(line_no=1,quantity=2,unit_price=14.79,amount=14.79,vat_amount=2.22,discount=0,gross_amount=34.02),
+            dict(line_no=2,quantity=1,unit_price=50.44,amount=50.44,vat_amount=7.57,discount=0,gross_amount=58.01),
+            dict(line_no=3,quantity=1,unit_price=14.79,amount=14.79,vat_amount=2.22,discount=0,gross_amount=17.01),
+        ],totals=dict(subtotal=94.81,discount=0,vat_rate=15,vat_amount=14.22,net_amount=109.03))
+        validation,_=_validate(data)
+        self.assertTrue(validation['items_calculation_valid'])
+        self.assertTrue(validation['subtotal_valid'])
+        self.assertEqual(validation['item_checks'][0]['calculation_mode'],'per_unit_printed_columns')
+        self.assertFalse(validation['line_vat_sum_matches'])
 
 
 if __name__ == "__main__":

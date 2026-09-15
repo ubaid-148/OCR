@@ -61,6 +61,19 @@ class EvidenceTests(unittest.TestCase):
         issues,_=audit_ai(sample(),source)
         self.assertTrue(any(i["field"]=="totals.net_amount" for i in issues))
 
+    def test_seller_address_cannot_be_assigned_to_customer(self):
+        data=sample();data['customer']['address']='Omar Street, Building 6595'
+        source=pages()
+        source[0]['words'] += [
+            dict(text='Building 6595',top=100,left=100,width=100,height=20,confidence=99),
+            dict(text='Customer',top=200,left=100,width=100,height=20,confidence=99),
+            dict(text='Building 3518',top=250,left=100,width=100,height=20,confidence=99),
+            dict(text='Description',top=400,left=100,width=100,height=20,confidence=99),
+        ]
+        issues,_=audit_ai(data,source)
+        self.assertIsNone(data['customer']['address'])
+        self.assertTrue(any(issue['field']=='customer.address' for issue in issues))
+
     def test_ai_cannot_silently_drop_a_row(self):
         fallback_data=sample()
         fallback_data["items"].append(dict(line_no=2, quantity=1, unit_price=None, amount=None))

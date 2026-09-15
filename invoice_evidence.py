@@ -5,7 +5,7 @@ import re
 from datetime import datetime
 from decimal import Decimal
 
-from invoice_formatter import DIGIT_TABLE
+from invoice_formatter import DIGIT_TABLE, center, contains
 
 
 def normalized(text):
@@ -60,10 +60,40 @@ def audit_ai(data, pages):
         pattern = r"(?<![\w/-])"+re.escape(value)+r"(?![\w/-])"
         matches = [(p,w) for p,w in words if value and re.search(pattern, normalized(w.get("text", "")))]
         check(container, key, f"{section}.{key}", matches)
+    # A customer address must be supported inside the buyer/customer section.
+    # Merely finding its building number elsewhere on the page can silently map
+    # the seller address to the customer, which is worse than returning null.
+    address=data.get('customer',{}).get('address')
+    address_numbers=[token for token in re.findall(r'(?<!\d)\d{3,10}(?!\d)',normalized(address or ''))]
+    if address and address_numbers:
+        anchors=[(p,w) for p,w in words if contains(w.get('text',''),(
+            'buyer','bill to','customer','customer details','المشتري','العميل','تفاصيل العميل')) and
+            not contains(w.get('text',''),('customer code','customer vat','tax','vat','كود العميل','الضريبي'))]
+        limits={}
+        for page_no,anchor in anchors:
+            limits[(page_no,id(anchor))]=min((center(w)[1] for p,w in words if p==page_no and
+                center(w)[1]>center(anchor)[1] and contains(w.get('text',''),(
+                    'item description','description','product description','اسم الصنف','وصف الصنف'))),default=float('inf'))
+        supported=[]
+        for token in address_numbers:
+            supported.extend((p,w) for p,w in words if re.search(r'(?<!\d)'+re.escape(token)+r'(?!\d)',normalized(w.get('text',''))) and
+                             any(ap==p and center(anchor)[1]<=center(w)[1]<limits[(ap,id(anchor))]
+                                 for ap,anchor in anchors))
+        if not supported:
+            data['customer']['address']=None
+            issues.append({'field':'customer.address','reason':'Address evidence is outside the customer section'})
+        else:
+            page,word=max(supported,key=lambda pair:float(pair[1].get('confidence') or 0))
+            evidence['customer.address']=dict(page=page,text=word.get('text',''),confidence=word.get('confidence'),
+                source=word.get('source','ocr'),bbox=[word.get(k) for k in ('left','top','width','height')])
     value = data["invoice"].get("date")
     matches = [(p,w) for p,w in words if value and any(date_key(t)==date_key(value)
                for t in re.findall(r"\b(?:\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[-/]\d{1,2}[-/]\d{4})\b", normalized(w.get("text", ""))))]
     check(data["invoice"], "date", "invoice.date", matches)
+    value = data["invoice"].get("date_of_supply")
+    matches = [(p,w) for p,w in words if value and any(date_key(t)==date_key(value)
+               for t in re.findall(r"\b(?:\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[-/]\d{1,2}[-/]\d{4})\b", normalized(w.get("text", ""))))]
+    check(data["invoice"], "date_of_supply", "invoice.date_of_supply", matches)
     containers = [("totals", data["totals"], ("subtotal", "discount", "vat_rate", "vat_amount", "net_amount"))]
     containers += [(f"items[{i}]", item, ("quantity", "unit_price", "amount", "vat_amount", "discount", "gross_amount")) for i,item in enumerate(data.get("items", []))]
     for prefix, container, keys in containers:

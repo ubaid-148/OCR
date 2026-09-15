@@ -54,8 +54,8 @@ The 111 PDFs in `public_invoice_pdfs/` were explicitly authorized by the user fo
 Explicit supplier/customer VAT labels, colon-prefixed identifiers and shared
 subtotal/VAT rows are supported. Missing quantity glyphs trigger padded numeric
 retries; a serial number in another column cannot suppress a recovered quantity.
-Clean JSON also includes printed customer address, item units, bank details,
-business description and amount-in-words when found. Handwriting and signature
+Clean JSON also includes date of supply, customer-section-scoped address, item
+units, bank details, business description and amount-in-words when found. Handwriting and signature
 verification are not implemented; recovered Arabic names may still need spelling review.
 
 Faint tables retain partial rows when quantity is unreadable. Explicit alphabetic
@@ -88,12 +88,12 @@ region. Detection is heuristic: missing fields still need the unobstructed sourc
 Uncertain identifiers, malformed numeric cells and mixed-script text can receive
 up to six targeted crops per page at 300 DPI using the English Paddle recognition
 model. Crop results are mapped back to the original 200 DPI coordinates.
-Arabic tables with merged headers can additionally receive up to twelve ruled
-cell crops when rows or explicitly labelled item codes/quantities are missing.
+Ruled tables with merged headers additionally receive cell-local header and value
+crops when rows are missing or a detected row loses/collides with a printed column.
 Missing totals and source arithmetic discrepancies no longer trigger a costly
 whole-table retry; they use focused footer crops and remain flagged for review.
 Header fields can be recovered independently of table detection. Responses carry
-`pipeline_version: 2026-09-multi-layout-v7` to identify this flow.
+`pipeline_version: 2026-09-source-grid-v8` to identify this flow.
 Typed candidates below 85% confidence are not promoted; raw alternatives remain in the
 OCR output. Set `OCR_TARGETED_RETRY=false` to disable retries. Both recognition
 models are cached after first use. Retry failures preserve the base OCR and flag

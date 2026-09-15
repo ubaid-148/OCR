@@ -36,13 +36,13 @@ class TrainingDatasetTests(unittest.TestCase):
     def test_normalizes_cloud_style_output_without_template_values(self):
         data = normalize_data({
             "seller": {"name_ar": "بائع", "tax_code": "300123"},
-            "invoice_details": {"invoice_serial": "X-7", "invoice_date": "2026-02-03T04:05:06"},
+            "invoice_details": {"invoice_serial": "X-7", "invoice_date": "2026-02-03T04:05:06", "date_of_supply": "2026-02-04"},
             "customer": {"name_ar": "مشتري", "tax_code": "300456"},
             "line_items": [{"item_id": "P 1", "item_name_ar": "وصف", "quantity": 1, "taxable_amount": 8, "tax_amount": 1.2, "total_incl_vat": 9.2}],
             "totals": {"total_excluding_vat": 8, "total_vat": 1.2, "total_amount_including_vat": 9.2, "currency": "SAR"},
         })
         self.assertEqual(data["supplier"]["vat_number"], "300123")
-        self.assertEqual(data["invoice"], {"invoice_number": "X-7", "date": "2026-02-03", "hijri_date": None, "time": "04:05:06", "payment_method": None})
+        self.assertEqual(data["invoice"], {"invoice_number": "X-7", "date": "2026-02-03", "date_of_supply": "2026-02-04", "hijri_date": None, "time": "04:05:06", "payment_method": None})
         self.assertEqual(data["items"][0]["item_code"], "P 1")
         self.assertEqual(data["totals"]["net_amount"], 9.2)
 

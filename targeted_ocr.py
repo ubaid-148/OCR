@@ -7,6 +7,7 @@ from document_regions import invoice_words
 from layout_invoice import (
     ALIASES, CUSTOMER_SECTION_LABELS, DATE_LABELS, INVOICE_LABELS,
     header_hint, header_match, numeric, parse_layout, table,
+    table_retry_reasons,
 )
 
 
@@ -27,14 +28,9 @@ def plan_regions(page):
     # particular, some printed invoices are internally inconsistent. Re-reading
     # every ruled cell in two languages cannot repair that source discrepancy and
     # is the most expensive part of the pipeline. Reserve the full-table retry for
-    # missing row structure; individual prices/amounts and totals get tight crops.
-    code_header=any(header_match(w['text'],ALIASES['item_code']) and
-                    (header is None or abs(center(w)[1]-header)<h*3) for w in words)
-    quantity_header=any(header_match(w['text'],ALIASES['quantity']) and
-                        (header is None or abs(center(w)[1]-header)<h*3) for w in words)
-    incomplete_table=(not rows or
-                      (code_header and any(item.get('item_code') is None for item in rows)) or
-                      (quantity_header and any(item.get('quantity') is None for item in rows)))
+    # missing rows/printed columns or reused evidence boxes; totals get tight crops.
+    table_issues=table_retry_reasons(words,rows,header,h)
+    incomplete_table=bool(table_issues)
     known_invoice=parsed and parsed['invoice'].get('invoice_number')
     known_invoice_evidence=parsed.get('field_evidence',{}).get('invoice.invoice_number') if parsed else None
     if known_invoice_evidence and known_invoice_evidence.get('bbox'):
@@ -55,7 +51,12 @@ def plan_regions(page):
     def add_row(w,kind,language='en'):
         candidates.append(dict(bbox=[0,w['top']-h*.6,page_width,w['top']+w['height']+h*.6],
                                kind=kind,original=w,language=language))
-    if parsed and not parsed['supplier'].get('name_en'):
+    supplier_en=parsed.get('supplier',{}).get('name_en') if parsed else None
+    compact_supplier=re.sub(r'[^A-Za-z]','',supplier_en or '')
+    bad_supplier_en=(not supplier_en or
+                     bool(re.search(r'[a-z][A-Z]',supplier_en or '')) or
+                     (len(compact_supplier)>18 and len((supplier_en or '').split())<3))
+    if parsed and bad_supplier_en:
         name_anchor=next((w for w in words if contains(w['text'],('مؤسسة','مؤسسه','شركة')) and center(w)[1]<header_limit*.5),None)
         if name_anchor:
             cluster=[w for w in words if abs(center(w)[1]-center(name_anchor)[1])<h]
@@ -111,6 +112,20 @@ def plan_regions(page):
             candidates[-1]['enhance']=True
         elif header and center(w)[1]>header and re.fullmatch(r'\d+[.]\d*[A-Za-z]',text) and numeric(text) is None:
             add(w,'numeric_cell')
+    # Header centres can be correct while mixed Arabic/Latin product text is
+    # truncated. Re-read the full description cell, not a fraction of the
+    # already-detected word box.
+    header_words=[w for w in words if header is not None and abs(center(w)[1]-header)<h*3]
+    description_heading=min((w for w in header_words if header_match(w['text'],ALIASES['description'])),
+                            key=lambda w:abs(center(w)[1]-header),default=None)
+    other_centres=sorted(center(w)[0] for w in header_words if w is not description_heading and
+                         any(header_match(w['text'],ALIASES[key]) for key in ALIASES if key!='description'))
+    description_bounds=None
+    if description_heading:
+        dx=center(description_heading)[0]
+        left=max((x for x in other_centres if x<dx),default=0)
+        right=min((x for x in other_centres if x>dx),default=page_width)
+        description_bounds=((left+dx)/2 if left else 0,(right+dx)/2 if right<page_width else page_width)
     for item in rows:
         for missing_key in ('quantity','unit_price','amount'):
             if item.get(missing_key) is not None:
@@ -136,15 +151,16 @@ def plan_regions(page):
                     candidates[-1]['dpi']=400
         for evidence in item.get('field_evidence',{}).get('description',[]):
             text=evidence['text']
-            if has_arabic(text) and not re.search('[A-Za-z]',text) and len(text)>=8 and not re.search('[A-Za-z]',item.get('description') or ''):
+            if (not incomplete_table and has_arabic(text) and not re.search('[A-Za-z]',text) and
+                    len(text)>=8 and not re.search('[A-Za-z]',item.get('description') or '')):
                 w=next((w for w in words if [w.get(k) for k in ('left','top','width','height')]==evidence['bbox']),None)
-                if w:add(w,'description','left')
-    if incomplete_table and hint is not None:
-        description_label=next((w for w in words if header_match(w['text'],ALIASES['description']) and abs(center(w)[1]-hint)<h*2),None)
-        if description_label:
-            for w in words:
-                if hint+h*.5<center(w)[1]<hint+h*3 and abs(center(w)[0]-center(description_label)[0])<h*4 and has_arabic(w['text']) and not re.search('[A-Za-z]',w['text']) and len(w['text'])>=8:
-                    add(w,'description','left')
+                if w:
+                    if description_bounds:
+                        candidates.append(dict(kind='description',original=w,language='en',enhance=True,
+                            bbox=[description_bounds[0],w['top']-h*.65,description_bounds[1],w['top']+w['height']+h*.65]))
+                    else:
+                        add(w,'description','whole')
+                        candidates[-1].update(language='en',enhance=True)
     # Prioritize identifiers and numeric cells before optional text improvements.
     order={'invoice_identifier':0,'vat_identifier':1,'customer_name_ar':2,'payment_method':3,'footer_totals':4,'date':5,
            'numeric_cell':6,'supplier_name_ar':7,'supplier_name_en':8,'supplier_name':9,'description':10}
@@ -158,7 +174,8 @@ def plan_regions(page):
         table_end=footer_y-h*.4 if footer_y is not None else min(page_height*.85,hint+max(12*h,page_height*.25))
         arabic_table=any(has_arabic(w['text']) and hint-3*h<center(w)[1]<table_end for w in words)
         candidates.insert(0,dict(bbox=[0,hint-h,page_width,max(hint+4*h,table_end)],kind='table_cells',original={},
-                                 language='ar' if arabic_table else 'en',recover_text=not rows))
+                                 language='ar' if arabic_table else 'en',recover_text=not rows,
+                                 recover_headers=bool(rows),retry_reasons=table_issues))
     return candidates
 
 
@@ -204,7 +221,7 @@ def retry_regions(pdf_page,page_payload,model,extract_words,temp_root):
                     regions.append(secondary)
                 continue
             for cell in cells:cell['dpi']=400
-            if region.get('language')=='en':
+            if region.get('language')=='en' and not region.get('recover_headers'):
                 h=region['bbox'][3]-region['bbox'][1]
                 for cell in cells:
                     cell['bbox'][1]=region['bbox'][1]+min(text_height*3,h*.08)
@@ -218,6 +235,15 @@ def retry_regions(pdf_page,page_payload,model,extract_words,temp_root):
                                    cell['bbox'][0]<=center(description_label)[0]<=cell['bbox'][2]),None)
             if region.get('language')!='ar' or region.get('recover_text'):
                 regions.extend(cells)
+            elif region.get('recover_headers'):
+                # Pure-Arabic tables still need a cell-local Arabic header box;
+                # keep these crops shallow, while English retries below recover
+                # Latin codes/numbers and bilingual header alternatives.
+                for cell in cells:
+                    header_cell=dict(cell,bbox=list(cell['bbox']))
+                    header_cell['bbox'][3]=min(header_cell['bbox'][3],region['bbox'][1]+text_height*5)
+                    header_cell['enhance']=True
+                    regions.append(header_cell)
             elif description_cell is not None:
                 # Keep one Arabic pass for the description column; numeric/code
                 # cells use the faster English recognizer.
@@ -228,7 +254,8 @@ def retry_regions(pdf_page,page_payload,model,extract_words,temp_root):
                     if not region.get('recover_text') and cell is description_cell:
                         continue
                     secondary=dict(cell,kind='table_cells_en',language='en',bbox=list(cell['bbox']))
-                    secondary['bbox'][1]+=min(text_height*3,(secondary['bbox'][3]-secondary['bbox'][1])*.08)
+                    if not region.get('recover_headers'):
+                        secondary['bbox'][1]+=min(text_height*3,(secondary['bbox'][3]-secondary['bbox'][1])*.08)
                     secondary['enhance']=True
                     regions.append(secondary)
         else:regions.append(region)
@@ -251,7 +278,7 @@ def retry_regions(pdf_page,page_payload,model,extract_words,temp_root):
                 cv2.imwrite(str(path),gray)
             else:picture.save(path)
         found=[]
-        predictor=model(region.get('language','ar')) if region['kind'] in {'table_cells','table_cells_en','table_area','table_area_en','footer_totals','supplier_name_ar','supplier_name_en','customer_name_ar','payment_method'} else model()
+        predictor=model(region.get('language','ar')) if region['kind'] in {'table_cells','table_cells_en','table_area','table_area_en','footer_totals','supplier_name_ar','supplier_name_en','customer_name_ar','payment_method','description'} else model()
         options={'text_det_thresh':.1,'text_det_box_thresh':.2} if region['kind'] in {'numeric_cell','table_cells','table_cells_en','table_area','table_area_en','footer_totals','date','invoice_identifier'} else {}
         for result in predictor.predict(str(path),**options):
             for word in extract_words(result):
@@ -307,7 +334,7 @@ def merge_retries(page, retries):
                 date=re.search(r'(?:\d{1,2}[-/]\d{1,2}[-/]\d{4}|\d{4}[-/]\d{1,2}[-/]\d{1,2})',text)[0]
                 time=re.search(r'\d{2}:\d{2}:\d{2}',text)
                 candidates.append(dict(word,text=date,raw_text=text,raw_time=time[0] if time else None))
-            elif kind=='description' and re.search(r'[A-Za-z]{3,}',text):
+            elif kind=='description' and (re.search(r'[A-Za-z]{3,}',text) or re.search(r'(?i)\b[A-Z]+\d+|\b\d+[/-]\d+\b',text)):
                 candidates.append(word)
             elif kind=='supplier_name' and re.search(r'[A-Za-z]{3,}',text) and len(text)>8:
                 candidates.append(word)

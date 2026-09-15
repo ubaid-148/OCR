@@ -79,3 +79,21 @@ class InvoiceDetailsTests(unittest.TestCase):
         self.assertEqual(data['totals']['subtotal'],50)
         self.assertEqual(data['totals']['vat_amount'],7.5)
         self.assertEqual(data['totals']['net_amount'],57.5)
+
+    def test_supply_date_and_address_stay_inside_customer_section(self):
+        words=[box(t,x,300) for t,x in [('Description',300),('Qty',600),('Unit Price',800),('Amount',1000)]]
+        words += [box(t,x,360) for t,x in [('Example item',300),('1',600),('5.00',800),('5.00',1000)]]
+        words += [box(t,x,y) for t,x,y in [
+            ('Invoice Date: 09/03/2026 11:19:38',700,60),
+            ('Date of Supply: 02-04-2026',700,100),
+            ('Seller Building: 6595',100,120),
+            ('Customer',700,160),('مؤسسة المثال للمقاولات العامة',350,160),
+            ('3518 : Building / المبنى',100,200),('الثالث عشر : Street / الشارع',420,200),
+            ('34623 : Post Code / الرمز البريدي',100,230),('الثقبة : Area / الحي',420,230),
+            ('8096 : Add No / الرقم الإضافي',100,260),('الخبر : City / المدينة',420,260),
+        ]]
+        data=parse_layout([dict(words=words)],'address.pdf','eng+ara')
+        self.assertEqual(data['invoice']['date_of_supply'],'02-04-2026')
+        self.assertIn('3518',data['customer']['address'])
+        self.assertIn('الثالث عشر',data['customer']['address'])
+        self.assertNotIn('6595',data['customer']['address'])

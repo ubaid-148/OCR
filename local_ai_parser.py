@@ -25,9 +25,10 @@ INVOICE_SCHEMA = {
             "vat_number": {"type": ["string", "null"]}}, "required": ["name_ar", "name_en", "vat_number"]},
         "invoice": {"type": "object", "properties": {
             "invoice_number": {"type": ["string", "null"]}, "date": {"type": ["string", "null"]},
+            "date_of_supply": {"type": ["string", "null"]},
             "hijri_date": {"type": ["string", "null"]}, "time": {"type": ["string", "null"]},
             "payment_method": {"type": ["string", "null"]}},
-            "required": ["invoice_number", "date", "hijri_date", "time", "payment_method"]},
+            "required": ["invoice_number", "date", "date_of_supply", "hijri_date", "time", "payment_method"]},
         "customer": {"type": "object", "properties": {
             "name": {"type": ["string", "null"]}, "vat_number": {"type": ["string", "null"]},
             "address": {"type": ["string", "null"]}}, "required": ["name", "vat_number", "address"]},
@@ -64,18 +65,35 @@ def _validate(data: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
     items = data.get("items") if isinstance(data.get("items"), list) else []
     item_checks = []
     amounts: list[Decimal] = []
+    line_taxes: list[Decimal | None] = []
     for index, item in enumerate(items):
         if not isinstance(item, dict):
             raise ValueError("Invoice items must be objects")
         qty, price, amount = (_decimal(item.get(key)) for key in ("quantity", "unit_price", "amount"))
         line_discount = _decimal(item.get('discount')) or Decimal('0')
-        valid = qty is not None and price is not None and amount is not None and abs(qty * price - line_discount - amount) <= tolerance
         gross, line_vat = _decimal(item.get('gross_amount')), _decimal(item.get('vat_amount'))
-        if gross is not None and line_vat is not None and amount is not None:
-            valid = valid and abs(amount + line_vat - gross) <= tolerance
-        item_checks.append({"line_no": item.get("line_no", index + 1), "valid": valid})
+        direct_amount=(qty is not None and price is not None and amount is not None and
+                       abs(qty * price - line_discount - amount) <= tolerance)
+        direct_gross=(gross is None or line_vat is None or amount is None or
+                      abs(amount + line_vat - gross) <= tolerance)
+        direct=direct_amount and direct_gross
+        # Some invoices label a column "taxable amount" but print per-unit
+        # taxable/VAT values while the gross column is the extended line total.
+        # Preserve those printed fields and validate their relationship instead
+        # of moving a nearby VAT value into quantity or fabricating an amount.
+        per_unit=(not direct and qty is not None and price is not None and amount is not None and
+                  gross is not None and line_vat is not None and
+                  abs(price-amount)<=tolerance and
+                  abs(qty*(amount+line_vat)-line_discount-gross)<=tolerance)
+        valid=direct or per_unit
+        calculation_mode='per_unit_printed_columns' if per_unit else 'extended_line' if direct else None
+        effective_amount=(qty*amount-line_discount if per_unit else amount)
+        effective_vat=(qty*line_vat if per_unit and line_vat is not None else line_vat)
+        item_checks.append({"line_no": item.get("line_no", index + 1), "valid": valid,
+                            "calculation_mode": calculation_mode})
         if amount is not None:
-            amounts.append(amount)
+            amounts.append(effective_amount)
+        line_taxes.append(effective_vat)
     totals = data.get("totals") if isinstance(data.get("totals"), dict) else {}
     subtotal, discount, vat, net = (_decimal(totals.get(key)) for key in ("subtotal", "discount", "vat_amount", "net_amount"))
     item_sum = sum(amounts, Decimal("0"))
@@ -92,7 +110,6 @@ def _validate(data: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
         "vat_expected": float(vat_expected) if vat_expected is not None else None, "vat_valid": vat_valid,
         "net_expected": float(net_expected) if net_expected is not None else None, "net_amount_valid": net_valid,
     }
-    line_taxes = [_decimal(item.get('vat_amount')) for item in items]
     tax_rounding_issue = bool(items) and all(v is not None for v in line_taxes) and vat is not None and abs(sum(line_taxes, Decimal('0'))-vat)>Decimal('.005')
     validation['line_vat_sum_matches'] = not tax_rounding_issue if items and all(v is not None for v in line_taxes) and vat is not None else None
     required = {
@@ -144,6 +161,7 @@ def _ask_ollama(pages: list[dict[str, Any]]) -> dict[str, Any]:
         "Extract this invoice into the required JSON schema. Each OCR box is [x,y,width,height,text] on a 0-1000 page grid. "
         "Layouts and label names vary: Buyer/Bill To/Customer are aliases; Qty/Quantity and Rate/Unit Price are aliases. "
         "Arabic invoice serial labels include مسلسل الفاتورة and رقم مسلسل الفاتورة; issue-date labels include تاريخ إصدار الفاتورة. "
+        "Keep Date of Supply/تاريخ التوريد separate from the invoice issue date. "
         "كود العميل means customer code, never customer name; find the actual company/person beside an اسم العميل or customer section. "
         "Item codes are optional; preserve every visible item row, including adjacent rows with similar descriptions, decimal quantities, units, and full alphanumeric invoice IDs. "
         "For each row, transcribe the printed pre-tax/taxable column into amount exactly as printed, even when it does not equal quantity times unit_price. "

@@ -24,7 +24,7 @@ PROMPT = """Extract every printed invoice field from all supplied page images in
 The document may use any Arabic, English, or bilingual layout. Read labels and spatial relationships; do not assume a supplier template.
 Return exactly these top-level objects: supplier, invoice, customer, items, totals.
 supplier keys: name_ar, name_en, vat_number.
-invoice keys: invoice_number, date, hijri_date, time, payment_method.
+invoice keys: invoice_number, date, date_of_supply, hijri_date, time, payment_method.
 customer keys: name, vat_number, address.
 Each items entry keys: line_no, item_code, description, quantity, unit, unit_price, amount, vat_amount, discount, gross_amount.
 totals keys: subtotal, discount, vat_rate, vat_amount, net_amount, currency.
@@ -32,7 +32,7 @@ Use JSON null when a value is not printed or genuinely unreadable. Preserve lead
 
 SECTION_KEYS = {
     "supplier": ("name_ar", "name_en", "vat_number"),
-    "invoice": ("invoice_number", "date", "hijri_date", "time", "payment_method"),
+    "invoice": ("invoice_number", "date", "date_of_supply", "hijri_date", "time", "payment_method"),
     "customer": ("name", "vat_number", "address"),
     "totals": ("subtotal", "discount", "vat_rate", "vat_amount", "net_amount", "currency"),
 }
@@ -88,6 +88,7 @@ def normalize_data(payload: dict[str, Any] | None) -> dict[str, Any]:
     result["invoice"] = {
         "invoice_number": _pick(invoice, "invoice_number", "invoice_serial"),
         "date": _pick(invoice, "date", "invoice_date"),
+        "date_of_supply": _pick(invoice, "date_of_supply", "supply_date"),
         "hijri_date": _pick(invoice, "hijri_date"),
         "time": _pick(invoice, "time"),
         "payment_method": _pick(invoice, "payment_method"),

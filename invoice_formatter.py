@@ -296,7 +296,7 @@ def parse_invoice(pages: list[dict[str, Any]], source_filename: str, language: s
             },
             "invoice": {
                 "invoice_number": number_string(str(invoice_word.get("text", "")), set(range(4, 11))) if invoice_word else None,
-                "date": gregorian, "hijri_date": hijri, "time": time_value, "payment_method": payment,
+                "date": gregorian, "date_of_supply": None, "hijri_date": hijri, "time": time_value, "payment_method": payment,
             },
             "customer": {
                 "name": customer_name,
