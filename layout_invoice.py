@@ -168,8 +168,17 @@ def table(words):
                 code=min((w for w in code_candidates if abs(center(w)[0]-hx['item_code'])<=tolerance('item_code')),
                          key=lambda w:abs(center(w)[0]-hx['item_code']),default=None)
             else:
+                # Without an explicit code header, a reordered Qty/Price/Amount
+                # column to the left of Description is not an item-code column.
+                # Only use a genuinely separate column, and require a code-like
+                # token rather than a plain monetary/quantity value.
+                known_numeric=('quantity','unit_price','amount','vat_amount','discount','gross_amount','vat_rate')
                 code=min((w for w in code_candidates if w['left']<headers['description']['left'] and
-                          center(w)[0]>hx.get('serial',-float('inf'))+h*.5),key=lambda w:w['left'],default=None)
+                           center(w)[0]>hx.get('serial',-float('inf'))+h*.5 and
+                           all(abs(center(w)[0]-hx[key])>tolerance(key) for key in known_numeric if key in hx) and
+                           (bool(re.search(r'[A-Za-z]',normalize(w['text']))) or
+                            bool(re.fullmatch(r'\d{3,}',normalize(w['text']))))),
+                         key=lambda w:w['left'],default=None)
             # A description spans the free area between neighbor header edges.
             dx=hx['description']
             left=max((headers[k]['left']+headers[k]['width'] for k,x in hx.items() if x<dx),default=-float('inf'))

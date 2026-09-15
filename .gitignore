@@ -9,3 +9,9 @@ uploads/*
 *.log
 .env
 qa_samples/
+training_data/
+training_workspace/
+model_artifacts/
+checkpoints/
+*.safetensors
+adapter_model.bin

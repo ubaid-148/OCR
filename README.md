@@ -43,6 +43,12 @@ Open <http://127.0.0.1:8765> and upload a PDF invoice.
 
 [Open the setup notebook in Colab](https://colab.research.google.com/github/ubaid-148/OCR/blob/main/colab_setup.ipynb), select **Runtime > Change runtime type > T4 GPU**, then **Runtime > Run all**. For a private repository, add a Colab secret named `GITHUB_TOKEN` with read access and enable notebook access; public repositories need no token. The notebook installs GPU Paddle on GPU runtimes and CPU Paddle otherwise, and verifies the installation in a fresh process. A GPU installation failure stops setup instead of silently running OCR on CPU. Local AI is enabled by default for unfamiliar layouts; Balanced mode skips it when spatial parsing passes validation. Fast mode explicitly skips AI and can miss fields on unfamiliar layouts.
 
+## Private multi-layout training
+
+The repository includes a two-notebook, source-verified training workflow for a folder of unrelated invoice layouts. Use [colab_dataset.ipynb](https://colab.research.google.com/github/ubaid-148/OCR/blob/main/colab_dataset.ipynb) to create resumable OCR drafts, review every value against private Drive page images, and export supplier/layout-isolated splits. Then use [colab_train.ipynb](https://colab.research.google.com/github/ubaid-148/OCR/blob/main/colab_train.ipynb) in a fresh GPU runtime for Qwen3-VL 2B LoRA training and held-out gates. See [TRAINING.md](TRAINING.md).
+
+PDFs, labels, rendered pages, predictions, and adapters are ignored and must not be committed to this public repository. OCR/cloud output is only a draft: export defaults to at least 80 explicitly verified documents. A trained adapter is rejected if it regresses on held-out critical fields, invalid JSON, exact-document accuracy, or unsupported-value behavior. Passing a private test set is not a 100% guarantee for unseen formats, so evidence validation and `needs_review` remain required.
+
 ## Flow
 
 Explicit supplier/customer VAT labels, colon-prefixed identifiers and shared
@@ -87,7 +93,7 @@ cell crops when rows or explicitly labelled item codes/quantities are missing.
 Missing totals and source arithmetic discrepancies no longer trigger a costly
 whole-table retry; they use focused footer crops and remain flagged for review.
 Header fields can be recovered independently of table detection. Responses carry
-`pipeline_version: 2026-09-multi-layout-v6` to identify this flow.
+`pipeline_version: 2026-09-multi-layout-v7` to identify this flow.
 Typed candidates below 85% confidence are not promoted; raw alternatives remain in the
 OCR output. Set `OCR_TARGETED_RETRY=false` to disable retries. Both recognition
 models are cached after first use. Retry failures preserve the base OCR and flag

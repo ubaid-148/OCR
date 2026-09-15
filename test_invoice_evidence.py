@@ -13,7 +13,8 @@ def sample():
     return dict(supplier=dict(name_en="Example Supplier", vat_number="310000000000011"),
                 customer=dict(name="Example Buyer", vat_number="310000000000022"),
                 invoice=dict(invoice_number="INV-001", date="2026-05-18"),
-                items=[dict(line_no=1, description="Steel hinges", quantity=2, unit_price=50, amount=100)],
+                items=[dict(line_no=1, description="Steel hinges", quantity=2, unit_price=50, amount=100,
+                            vat_amount=15, gross_amount=115)],
                 totals=dict(subtotal=100, discount=None, vat_rate=15, vat_amount=15, net_amount=115))
 
 
@@ -41,7 +42,7 @@ class EvidenceTests(unittest.TestCase):
 
     def test_arithmetically_consistent_invented_amounts_are_rejected(self):
         data = sample()
-        data["items"][0].update(unit_price=100, amount=200)
+        data["items"][0].update(unit_price=100, amount=200, vat_amount=30, gross_amount=230)
         data["totals"].update(subtotal=200, vat_amount=30, net_amount=230)
         self.assertFalse(_validate(data)[1]["needs_review"])
         issues,_ = audit_ai(data,pages())
