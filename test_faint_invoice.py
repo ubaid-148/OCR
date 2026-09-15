@@ -25,11 +25,11 @@ class FaintInvoiceTests(unittest.TestCase):
         self.assertEqual(data['totals']['net_amount'],27.6)
 
     def test_vat_and_date_are_not_invoice_identifiers(self):
-        words=fixture()+[box('Invoice No',600,100),box('11/03/2026',200,100),box('300402905200003',400,100)]
+        words=fixture()+[box('Invoice No',600,100),box('11/03/2026',200,100),box('310000000000099',400,100)]
         data=parse_layout([{'words':words}],'test.pdf','eng')
         self.assertIsNone(data['invoice']['invoice_number'])
 
     def test_customer_vat_can_precede_customer_name(self):
-        words=fixture()+[box('Supplier Trading',0,0),box('300056327900003',0,30),box('الرقم الضربي للعميل',400,140),box('300402905200003',400,115),box('اسم العميل',600,200),box('Customer Trading Est.',100,200)]
+        words=fixture()+[box('Supplier Trading',0,0),box('310000000000001',0,30),box('الرقم الضربي للعميل',400,140),box('310000000000002',400,115),box('اسم العميل',600,200),box('Customer Trading Est.',100,200)]
         data=parse_layout([{'words':words}],'test.pdf','eng+ara')
-        self.assertEqual(data['customer']['vat_number'],'300402905200003')
+        self.assertEqual(data['customer']['vat_number'],'310000000000002')

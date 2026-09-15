@@ -68,11 +68,11 @@ class LayoutInvoiceTests(unittest.TestCase):
     def test_spaced_codes_and_blank_line_vat_keep_pretax_totals(self):
         words = [box(t, x, 300) for t,x in [("Item Code",100),("Description",400),
                  ("Qty",700),("Unit Price",850),("VAT",1000),("Total Amount",1150)]]
-        words += [box(t,x,360) for t,x in [("PAINT BRUSH 2",100),("Paint brush",400),
+        words += [box(t,x,360) for t,x in [("BATCH SAMPLE 2",100),("Example product",400),
                   ("2",700),("5.00",850),("10.00",1150)]]
         rows,_,_=table(words)
         self.assertEqual(len(rows),1)
-        self.assertEqual(rows[0]["item_code"],"PAINT BRUSH 2")
+        self.assertEqual(rows[0]["item_code"],"BATCH SAMPLE 2")
         self.assertEqual(rows[0]["quantity"],2)
         self.assertEqual(rows[0]["amount"],10)
         self.assertIsNone(rows[0]["vat_amount"])
@@ -82,11 +82,11 @@ class LayoutInvoiceTests(unittest.TestCase):
         words = [box(t, x, 300) for t,x in [("Description",300),("Qty",600),
                  ("Unit Price",800),("Amount",1000)]]
         words += [box(t,x,360) for t,x in [("Example item",300),("1",600),("5.00",800),("5.00",1000)]]
-        words += [box("Inv. No.",500,100),box("672",1050,100)]
-        handwritten=box("9481",720,80);handwritten['height']=60
+        words += [box("Inv. No.",500,100),box("321",1050,100)]
+        handwritten=box("9876",720,80);handwritten['height']=60
         words.append(handwritten)
         result=parse_layout([{'words':words}],'example.pdf','eng')
-        self.assertEqual(result['invoice']['invoice_number'],'672')
+        self.assertEqual(result['invoice']['invoice_number'],'321')
 
     def test_address_and_vat_rate_are_not_money(self):
         self.assertIsNone(numeric("Building No.,City : 6616,Al Khobar"))

@@ -10,8 +10,8 @@ from local_ai_parser import _ask_ollama, _validate, parse_invoice_hybrid
 
 
 def sample():
-    return dict(supplier=dict(name_en="Example Supplier", vat_number="300507245400003"),
-                customer=dict(name="Example Buyer", vat_number="300402905100003"),
+    return dict(supplier=dict(name_en="Example Supplier", vat_number="310000000000011"),
+                customer=dict(name="Example Buyer", vat_number="310000000000022"),
                 invoice=dict(invoice_number="INV-001", date="2026-05-18"),
                 items=[dict(line_no=1, description="Steel hinges", quantity=2, unit_price=50, amount=100)],
                 totals=dict(subtotal=100, discount=None, vat_rate=15, vat_amount=15, net_amount=115))
@@ -19,7 +19,7 @@ def sample():
 
 def pages():
     return [dict(page=1, words=[dict(text=t, confidence=99) for t in
-            ["300507245400003", "300402905100003", "INV-001", "18/05/2026", "2", "50", "100", "15 %", "15.00", "115"]])]
+            ["310000000000011", "310000000000022", "INV-001", "18/05/2026", "2", "50", "100", "15 %", "15.00", "115"]])]
 
 
 class EvidenceTests(unittest.TestCase):
