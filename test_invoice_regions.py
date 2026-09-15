@@ -15,6 +15,12 @@ class InvoiceRegionTests(unittest.TestCase):
         self.assertIn('invoice_identifier',[p['kind'] for p in plans])
         self.assertIn('table_cells',[p['kind'] for p in plans])
 
+    def test_complete_rows_do_not_retry_whole_table_for_missing_totals(self):
+        words=[box(t,x,300) for t,x in [('Item Code',20),('Description',300),('Qty',650),('Unit Price',850),('Amount',1050)]]
+        words += [box(t,x,360) for t,x in [('A-101',20),('Example item',300),('2',650),('10.00',850),('20.00',1050)]]
+        plans=plan_regions(dict(words=words,width=500,height=700,render_dpi=200))
+        self.assertNotIn('table_cells',[p['kind'] for p in plans])
+
     def test_joined_arabic_unit_and_price_headers(self):
         self.assertTrue(header_match('سعر افراديالوحدة',('سعر افرادي',)))
 

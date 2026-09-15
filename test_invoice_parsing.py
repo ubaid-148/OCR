@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 from invoice_formatter import contains, parse_invoice
 from local_ai_parser import parse_invoice_hybrid
+from test_invoice_evidence import pages, sample
 
 
 def word(text, top, left=100):
@@ -52,6 +53,18 @@ class InvoiceParsingTests(unittest.TestCase):
             result = parse_invoice_hybrid([], "sample.pdf", "eng+ara", mode="fast")
         ai.assert_not_called()
         self.assertIn("review_message", result["quality"])
+
+    def test_complete_source_mismatch_does_not_call_ai(self):
+        data=sample()
+        data['items'][0]['vat_amount'] += .01
+        legacy={'data':data,'quality':{'low_confidence_fields':[]}}
+        with patch.dict(os.environ, {"USE_LOCAL_AI": "true"}), \
+             patch('local_ai_parser.parse_invoice',return_value=legacy), \
+             patch('local_ai_parser.parse_layout',return_value=None), \
+             patch('local_ai_parser._ask_ollama') as ai:
+            result=parse_invoice_hybrid(pages(),'example.pdf','eng+ara')
+        ai.assert_not_called()
+        self.assertEqual(result['quality']['local_ai_status'],'skipped_source_only_review')
 
 
 if __name__ == "__main__":

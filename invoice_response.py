@@ -32,6 +32,8 @@ def clean_invoice_response(payload):
             'parser': quality.get('parser', 'unknown'),
             'local_ai_status': quality.get('local_ai_status', 'not_reported'),
             'data': result, 'review_notes': list(dict.fromkeys(reasons))}
+    response['ocr_device']=payload.get('ocr_device','unknown')
+    response['timings_seconds']=payload.get('timings_seconds',{})
     if quality.get('local_ai_status')=='failed' and quality.get('local_ai_error'):
         response['local_ai_error']=quality['local_ai_error']
     return response

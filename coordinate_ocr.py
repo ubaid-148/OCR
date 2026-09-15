@@ -121,10 +121,14 @@ def extract_pdf(input_path: Path, languages: str, progress=None) -> dict[str, ob
             return result
         payload = _extract_pdf(input_path, languages, paddle_language, model, progress)
         payload["device"] = get_ocr_device() if any(p["extraction_method"] == "ocr" for p in payload["pages"]) else "not_used"
+        ocr_seconds=perf_counter() - acquired - load_seconds
+        targeted_seconds=sum(float(page.get('targeted_ocr_seconds',0) or 0) for page in payload['pages'])
         payload["timings_seconds"] = {
             "queue": round(acquired - started, 3),
             "model_load": round(load_seconds, 3),
-            "render_and_ocr": round(perf_counter() - acquired - load_seconds, 3),
+            "base_render_and_ocr": round(max(0,ocr_seconds-targeted_seconds),3),
+            "targeted_ocr": round(targeted_seconds,3),
+            "render_and_ocr": round(ocr_seconds, 3),
         }
         return payload
 
@@ -185,7 +189,7 @@ def _extract_pdf(input_path, languages, paddle_language, model, progress=lambda 
             pages.append(page_payload)
             page.close()
     return {
-        "pipeline_version": "2026-09-colab-stable-v4",
+        "pipeline_version": "2026-09-fast-accuracy-v5",
         "engine": f"PDFium native text / PaddleOCR 3 ({paddle_language})",
         "language": languages, "pages": pages,
     }

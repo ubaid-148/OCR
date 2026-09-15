@@ -39,11 +39,14 @@ class FlowTests(unittest.TestCase):
         self.assertEqual(_validate(sample())[1]["overall_status"], "checks_passed")
 
     def test_clean_response_exposes_pipeline_and_parser(self):
-        payload={"pipeline_version":"test-flow","data":{},
+        payload={"pipeline_version":"test-flow","ocr_device":"gpu:0",
+                 "timings_seconds":{"targeted_ocr":1.25},"data":{},
                  "quality":{"needs_review":True,"parser":"spatial_fast"}}
         result=clean_invoice_response(payload)
         self.assertEqual(result["pipeline_version"],"test-flow")
         self.assertEqual(result["parser"],"spatial_fast")
+        self.assertEqual(result["ocr_device"],"gpu:0")
+        self.assertEqual(result["timings_seconds"]["targeted_ocr"],1.25)
 
     def test_clean_response_exposes_ai_failure_reason(self):
         payload={"data":{},"quality":{"needs_review":True,"parser":"spatial_fallback",

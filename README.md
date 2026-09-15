@@ -66,10 +66,11 @@ Colab loads Arabic and English OCR models during server startup, so model downlo
 time is visible in setup rather than hidden in the first upload. This moves cold
 startup cost; it does not remove it. GPU acceleration still requires CUDA Paddle.
 
-The default **Invoice JSON** output contains `status`, invoice `data`, and short
-`review_notes`. It omits raw OCR, coordinates, confidence evidence, timings and
-internal validation details. Missing values remain null and uncertain results
-retain `needs_review`. Item `amount` is pre-tax; `gross_amount` includes VAT.
+The default **Invoice JSON** output contains `status`, invoice `data`, short
+`review_notes`, `ocr_device`, and stage-level `timings_seconds`. It omits raw OCR,
+coordinates, confidence evidence, and internal validation details. Missing values
+remain null and uncertain results retain `needs_review`. Item `amount` is pre-tax;
+`gross_amount` includes VAT.
 Select **Detailed invoice JSON (debug)** (`format=invoice_debug`) for the original
 diagnostic response, including derivation evidence. Raw OCR remains a separate option.
 
@@ -82,9 +83,11 @@ Uncertain identifiers, malformed numeric cells and mixed-script text can receive
 up to six targeted crops per page at 300 DPI using the English Paddle recognition
 model. Crop results are mapped back to the original 200 DPI coordinates.
 Arabic tables with merged headers can additionally receive up to twelve ruled
-cell crops using Arabic recognition when rows, item codes, or totals indicate an incomplete table.
+cell crops when rows or explicitly labelled item codes/quantities are missing.
+Missing totals and source arithmetic discrepancies no longer trigger a costly
+whole-table retry; they use focused footer crops and remain flagged for review.
 Header fields can be recovered independently of table detection. Responses carry
-`pipeline_version: 2026-09-colab-stable-v4` to identify this flow.
+`pipeline_version: 2026-09-fast-accuracy-v5` to identify this flow.
 Typed candidates below 85% confidence are not promoted; raw alternatives remain in the
 OCR output. Set `OCR_TARGETED_RETRY=false` to disable retries. Both recognition
 models are cached after first use. Retry failures preserve the base OCR and flag
@@ -159,15 +162,17 @@ serialized because the native predictor and PDFium resources are shared.
 Run the server with the Python environment containing PaddleOCR. If you set
 `OCR_PYTHON_EXE`, the legacy subprocess path is used and models reload per upload.
 
-Balanced mode skips Ollama when spatial parsing passes its checks and includes
-an invoice date. Fast mode skips AI entirely; unfamiliar layouts may need more
-manual review. Neither mode lowers the 200 DPI rendering resolution.
+Accuracy mode skips Ollama when spatial parsing passes its checks, and also when
+all required fields are present but the printed source arithmetic still requires
+review. Fast mode skips AI entirely; unfamiliar layouts may need more manual
+review. Neither mode lowers the 200 DPI rendering resolution.
 `USE_LOCAL_AI=false` disables AI globally. `OLLAMA_TIMEOUT_SECONDS` defaults to
 60 seconds (HTTP socket timeout, not an overall job deadline). Ollama is asked
 to keep its model loaded for 30 minutes.
 
-JSON output includes `timings_seconds` for OCR, invoice parsing, and total
-processing; the persistent path also reports queue, model load, and render/OCR.
+JSON output includes `timings_seconds` for base render/OCR, targeted retries,
+invoice parsing, and total processing; the persistent path also reports queue and
+model loading.
 Compare the first and second uploads of the same PDF in Colab to measure the
 warm-model improvement. No fixed latency is guaranteed; page count, layout,
 hardware, and runtime load matter. Update the repository copy before rerunning

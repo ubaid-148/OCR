@@ -254,6 +254,17 @@ def _parse_invoice_hybrid(pages: list[dict[str, Any]], source_filename: str, lan
     if spelling_review and not critical_missing and all(financial_checks.get(k) for k in ('items_calculation_valid','subtotal_valid','vat_valid','net_amount_valid')):
         fallback['quality']['local_ai_status']='skipped_source_review'
         return fallback
+    # If every required field is already present and only source arithmetic or
+    # rounding keeps the result in review, a text-only model has no missing OCR
+    # evidence to recover. Avoid a slow generation that will be rejected by the
+    # same validation checks, while keeping the review status visible.
+    if (fallback['quality'].get('needs_review') and
+            not fallback['quality'].get('missing_fields') and
+            not fallback['quality'].get('low_confidence_fields') and
+            fallback['data']['invoice'].get('date')):
+        fallback['quality']['parser']='spatial_source_review'
+        fallback['quality']['local_ai_status']='skipped_source_only_review'
+        return fallback
     if not fallback["quality"]["needs_review"] and fallback["data"]["invoice"].get("date"):
         fallback["quality"]["parser"] = "spatial_checks_passed"
         fallback["quality"]["local_ai_status"] = "skipped_checks_passed"

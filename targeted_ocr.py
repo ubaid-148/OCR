@@ -23,12 +23,18 @@ def plan_regions(page):
     candidates=[]
     parsed=parse_layout([page],'','')
     totals=parsed.get('totals',{}) if parsed else {}
-    amounts=[item.get('amount') for item in rows]
-    subtotal=totals.get('subtotal')
-    subtotal_mismatch=(subtotal is not None and amounts and all(value is not None for value in amounts)
-                       and abs(sum(amounts)-subtotal)>.02)
-    incomplete_table=(not rows or any(item.get('quantity') is None or item.get('item_code') is None for item in rows)
-                      or subtotal_mismatch or (parsed is not None and (subtotal is None or totals.get('net_amount') is None)))
+    # A totals/arithmetic review is not evidence that table detection failed. In
+    # particular, some printed invoices are internally inconsistent. Re-reading
+    # every ruled cell in two languages cannot repair that source discrepancy and
+    # is the most expensive part of the pipeline. Reserve the full-table retry for
+    # missing row structure; individual prices/amounts and totals get tight crops.
+    code_header=any(header_match(w['text'],ALIASES['item_code']) and
+                    (header is None or abs(center(w)[1]-header)<h*3) for w in words)
+    quantity_header=any(header_match(w['text'],ALIASES['quantity']) and
+                        (header is None or abs(center(w)[1]-header)<h*3) for w in words)
+    incomplete_table=(not rows or
+                      (code_header and any(item.get('item_code') is None for item in rows)) or
+                      (quantity_header and any(item.get('quantity') is None for item in rows)))
     known_invoice=parsed and parsed['invoice'].get('invoice_number')
     if parsed and not parsed['supplier'].get('name_ar'):
         name_anchor=next((w for w in words if contains(w['text'],('مؤسسة','مؤسسه','شركة')) and center(w)[1]<header_limit*.5),None)
@@ -144,7 +150,7 @@ def plan_regions(page):
         table_end=footer_y-h*.4 if footer_y is not None else min(page_height*.85,hint+max(12*h,page_height*.25))
         arabic_table=any(has_arabic(w['text']) and hint-3*h<center(w)[1]<table_end for w in words)
         candidates.insert(0,dict(bbox=[0,hint-h,page_width,max(hint+4*h,table_end)],kind='table_cells',original={},
-                                 language='ar' if arabic_table else 'en'))
+                                 language='ar' if arabic_table else 'en',recover_text=not rows))
     return candidates
 
 
@@ -179,7 +185,8 @@ def retry_regions(pdf_page,page_payload,model,extract_words,temp_root):
             cells=grid_cells(pdf_page,region,dpi,page_width,page_height)
             if len(cells)<4:
                 primary=dict(region,kind='table_area',dpi=400)
-                regions.append(primary)
+                if region.get('language')!='ar' or region.get('recover_text'):
+                    regions.append(primary)
                 if region.get('language')=='ar':
                     secondary=dict(primary,kind='table_area_en',language='en',bbox=list(primary['bbox']))
                     secondary['bbox'][1]+=(primary['bbox'][3]-primary['bbox'][1])*.22
@@ -191,7 +198,11 @@ def retry_regions(pdf_page,page_payload,model,extract_words,temp_root):
                 for cell in cells:
                     cell['bbox'][1]=region['bbox'][1]+h*.45
                     cell['enhance']=True
-            regions.extend(cells)
+            # The base Arabic pass already recovered existing descriptions. For
+            # partially recovered tables, English numeric/code cells are enough;
+            # retain dual-language cell OCR only when no rows were found at all.
+            if region.get('language')!='ar' or region.get('recover_text'):
+                regions.extend(cells)
             if region.get('language')=='ar':
                 for cell in cells:
                     secondary=dict(cell,kind='table_cells_en',language='en',bbox=list(cell['bbox']))
