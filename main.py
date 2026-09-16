@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,12 @@ from pdf_fallback import cross_check
 from table_extractor import extract_table
 from validator import validate
 from canonical_schema import to_canonical
+from llm_extractor import extract_with_ollama
+
+
+CANONICAL_KEYS = ("document_type", "invoice_number", "invoice_serial", "invoice_date", "date_of_supply",
+                  "reference_no", "payment_method", "seller", "customer", "items", "totals", "vat_summary",
+                  "currency", "page_info", "validation")
 
 
 def _boxes(payload: Any) -> list[dict[str, Any]]:
@@ -51,13 +58,109 @@ def build_document(payload: Any, pdf_path: str | None = None) -> dict[str, Any]:
     return to_canonical(document)
 
 
+def _flat_paths(value: Any, prefix: str = "") -> dict[str, Any]:
+    if isinstance(value, dict):
+        result = {}
+        for key, child in value.items():
+            result.update(_flat_paths(child, f"{prefix}.{key}" if prefix else key))
+        return result
+    if isinstance(value, list):
+        result = {}
+        for index, child in enumerate(value):
+            result.update(_flat_paths(child, f"{prefix}[{index}]"))
+        return result
+    return {prefix: value}
+
+
+def _set_path(document: dict[str, Any], path: str, value: Any) -> None:
+    tokens = re.findall(r"[^.\[\]]+|\[\d+\]", path)
+    cursor: Any = document
+    for index, token in enumerate(tokens):
+        if token.startswith("["):
+            item_index = int(token[1:-1])
+            while len(cursor) <= item_index:
+                cursor.append({})
+            cursor = cursor[item_index]
+            continue
+        if index == len(tokens) - 1:
+            cursor[token] = value
+        else:
+            next_token = tokens[index + 1]
+            if next_token.startswith("["):
+                cursor = cursor.setdefault(token, [])
+            else:
+                cursor = cursor.setdefault(token, {})
+
+
+def _same_value(left: Any, right: Any) -> bool:
+    if left is None or right is None:
+        return left is right
+    try:
+        return abs(float(left) - float(right)) <= 0.01
+    except (TypeError, ValueError):
+        return str(left).strip().casefold() == str(right).strip().casefold()
+
+
+def merge_drafts(rule_based: dict[str, Any], llm_draft: dict[str, Any] | None,
+                 warnings: list[str] | None = None) -> dict[str, Any]:
+    merged = json.loads(json.dumps(rule_based, ensure_ascii=False))
+    review = list(warnings or [])
+    if llm_draft is None:
+        return merged
+    rule_values, llm_values = _flat_paths(rule_based), _flat_paths(llm_draft)
+    for path, llm_value in llm_values.items():
+        if path.startswith("validation") or path.startswith("page_info"):
+            continue
+        rule_value = rule_values.get(path)
+        if rule_value is None and llm_value is not None:
+            _set_path(merged, path, llm_value)
+            review.append(f"filled_by_llm: {path} — not confirmed by rule-based extraction, verify manually")
+        elif rule_value is not None and llm_value is not None and not _same_value(rule_value, llm_value):
+            review.append(f"field '{path}' mismatch: rule_based={rule_value!r}, llm={llm_value!r} — using rule_based")
+    merged["validation"] = {"passed": False, "warnings": review}
+    return merged
+
+
+def _assert_clean_schema(result: dict[str, Any]) -> None:
+    if tuple(result) != CANONICAL_KEYS:
+        raise RuntimeError(f"Final output schema mismatch: expected {CANONICAL_KEYS}, got {tuple(result)}")
+    if any(key in json.dumps(result, ensure_ascii=False) for key in ("bbox", "confidence")):
+        raise RuntimeError("Raw OCR evidence leaked into clean output")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("input", type=Path)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--pdf", type=Path, help="Optional source PDF for low-confidence cross-checks")
+    parser.add_argument("--model", help="Optional local Ollama model name")
+    parser.add_argument("--no-llm", action="store_true", help="Use rules-only extraction")
+    parser.add_argument("--debug-dir", type=Path, help="Write intermediate OCR/draft files here")
     args = parser.parse_args()
-    result = build_document(json.loads(args.input.read_text(encoding="utf-8")), str(args.pdf) if args.pdf else None)
+    payload = json.loads(args.input.read_text(encoding="utf-8"))
+    rule_based = build_document(payload, str(args.pdf) if args.pdf else None)
+    warnings = []
+    llm_draft = None
+    if args.model and not args.no_llm:
+        try:
+            llm_draft = to_canonical(extract_with_ollama(payload, args.model))
+        except (RuntimeError, ValueError, json.JSONDecodeError) as error:
+            warnings.append(f"llm_unavailable: extraction used rule-based pipeline only ({error})")
+    result = to_canonical(merge_drafts(rule_based, llm_draft, warnings))
+    canonical_warnings = list(result.get("validation", {}).get("warnings", []))
+    arithmetic_validation = validate(result)
+    result["validation"] = arithmetic_validation
+    result["validation"]["warnings"] = list(dict.fromkeys(canonical_warnings + arithmetic_validation["warnings"]))
+    result["validation"]["passed"] = not result["validation"]["warnings"]
+    if warnings:
+        result["validation"]["warnings"] = list(dict.fromkeys(warnings + result["validation"].get("warnings", [])))
+        result["validation"]["passed"] = False
+    _assert_clean_schema(result)
+    if args.debug_dir:
+        args.debug_dir.mkdir(parents=True, exist_ok=True)
+        (args.debug_dir / "raw_ocr.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        (args.debug_dir / "rule_based_draft.json").write_text(json.dumps(rule_based, ensure_ascii=False, indent=2), encoding="utf-8")
+        (args.debug_dir / "llm_draft.json").write_text(json.dumps(llm_draft, ensure_ascii=False, indent=2), encoding="utf-8")
     args.output.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0
