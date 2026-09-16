@@ -175,6 +175,33 @@ class LayoutInvoiceTests(unittest.TestCase):
         self.assertEqual(validation['item_checks'][0]['calculation_mode'],'per_unit_printed_columns')
         self.assertFalse(validation['line_vat_sum_matches'])
 
+    def test_impossible_row_values_are_rejected_by_arithmetic(self):
+        words = [box(t, x, 300) for t, x in [
+            ("Description", 100), ("Qty", 500), ("Unit Price", 700),
+            ("Taxable Amount", 900), ("VAT", 1100), ("Including VAT", 1300),
+        ]]
+        valid_row = [
+            box("Oil HELIX 15/40", 100, 360),
+            box("2", 500, 360),
+            box("12.50", 700, 360),
+            box("12.50", 900, 360),
+            box("1.88", 1100, 360),
+            box("26.88", 1300, 360),
+        ]
+        invalid_row = [
+            box("Oil HELIX 15/40", 100, 420),
+            box("2", 500, 420),
+            box("12.50", 700, 420),
+            box("99.00", 900, 420),
+            box("1.88", 1100, 420),
+            box("26.88", 1300, 420),
+        ]
+        words += valid_row + invalid_row
+        parsed, _, _ = table(words)
+        self.assertEqual(len(parsed), 1)
+        self.assertEqual(parsed[0]["quantity"], 2)
+        self.assertEqual(parsed[0]["amount"], 12.5)
+
 
 if __name__ == "__main__":
     unittest.main()

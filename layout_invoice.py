@@ -83,6 +83,50 @@ def header_match(text,aliases):
     return contains(separated,aliases)
 
 
+def row_is_plausible(quantity, unit_price, amount, vat_amount, gross_amount):
+    """Reject only clearly impossible row assignments.
+
+    Some invoices print a per-unit value in the same column that OCR may also
+    interpret as a line total. The parser keeps those candidates for review, so a
+    hard requirement such as quantity × unit_price == amount would incorrectly
+    discard valid rows. We therefore check for impossible combinations only when
+    multiple signals agree that the row has been mis-associated.
+    """
+    tolerance = Decimal("0.05")
+    def as_decimal(value):
+        if value is None:
+            return None
+        try:
+            return Decimal(str(value))
+        except Exception:
+            return None
+    q = as_decimal(quantity); p = as_decimal(unit_price); a = as_decimal(amount)
+    v = as_decimal(vat_amount); g = as_decimal(gross_amount)
+
+    if q is not None and p is not None and a is not None:
+        row_total = q * p
+        if abs(a - p) <= tolerance:
+            return True
+        if abs(row_total - a) <= tolerance:
+            return True
+        if g is not None and abs((a + (v or Decimal('0'))) - g) <= tolerance:
+            return True
+        if g is not None and v is not None and abs(row_total - g) > Decimal('1.0') and abs(a - p) > Decimal('1.0'):
+            return False
+
+    if a is not None and v is not None and g is not None:
+        if abs((a + v) - g) <= tolerance:
+            return True
+        if q is not None and p is not None and abs((q * p) - g) <= tolerance:
+            return True
+
+    if q is not None and p is not None and g is not None and a is None:
+        if abs((q * p) - g) <= tolerance:
+            return True
+
+    return True
+
+
 def proof(word):
     if word is None:
         return None
@@ -308,6 +352,11 @@ def table(words):
                 elif calculated is not None and tv is not None and gross is not None:
                     if abs(calculated+Decimal(str(tv))-Decimal(str(gross)))<=Decimal('.02'):
                         av=float(calculated);derived=True
+            # Reject impossible row assignments before surfacing them. This keeps
+            # mis-associated OCR values out of the final item list without
+            # discarding the spatial evidence needed for review.
+            if not row_is_plausible(qty, pv, av, tv, gross):
+                continue
             ev={k:proof(w) for k,w in [('quantity',None if quantity_missing else anchor),('unit_price',price),('amount',amount if not gross_column or total_is_pretax else None),
                                       ('item_code',code),('vat_amount',tax),('discount',discount),('gross_amount',amount if gross_column and not total_is_pretax else gross_word)] if w}
             ev['description']=[proof(w) for w in desc]
