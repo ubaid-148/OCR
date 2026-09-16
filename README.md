@@ -45,6 +45,11 @@ Open <http://127.0.0.1:8765> and upload a PDF invoice.
 
 [Open the setup notebook in Colab](https://colab.research.google.com/github/ubaid-148/OCR/blob/main/colab_setup.ipynb), select **Runtime > Change runtime type > T4 GPU**, then **Runtime > Run all**. The public repository needs no token. The notebook installs Paddle in an isolated environment and pulls Qwen3-VL 4B into Ollama. Accuracy mode reads every original PDF page even when spatial OCR appears complete; Fast skips vision. The first setup downloads models. A T4 may still be slower than a cloud service, and this release needs a Colab accuracy/latency benchmark before any production claim.
 
+Cell 6 automatically runs one real `9498.pdf` regression through the Colab app
+and prints pass/fail for known invoice identifiers, all three item rows, totals,
+and runtime. Disable `RUN_9498_CHECK` to skip it. This single-document check
+does not establish accuracy across the other layouts.
+
 ## Private multi-layout training
 
 The repository includes a separate two-notebook training workflow for unrelated invoice layouts. Use [colab_dataset.ipynb](https://colab.research.google.com/github/ubaid-148/OCR/blob/main/colab_dataset.ipynb) to create OCR drafts, then **manually verify every field against the page** before export. [colab_train.ipynb](https://colab.research.google.com/github/ubaid-148/OCR/blob/main/colab_train.ipynb) trains a Qwen3-VL 2B LoRA experiment from those verified labels. See [TRAINING.md](TRAINING.md). The current Colab inference model is the stock Qwen3-VL 4B, **not** that adapter; uploading PDFs alone did not train or deploy a model.
