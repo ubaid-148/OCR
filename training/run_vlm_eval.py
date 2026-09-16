@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from training.invoice_dataset import PROMPT, normalize_data
+from training.qwen_processor import load_processor
 
 
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -24,8 +25,9 @@ def _file_digest(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _run_id(model_id: str, adapter_dir: Path | None, split: str, max_pixels: int, max_new_tokens: int) -> str:
-    parts = [model_id, split, str(max_pixels), str(max_new_tokens), PROMPT]
+def _run_id(model_id: str, adapter_dir: Path | None, split: str, max_pixels: int,
+            max_new_tokens: int, manifest_path: Path) -> str:
+    parts = [model_id, split, str(max_pixels), str(max_new_tokens), PROMPT, _file_digest(manifest_path)]
     if adapter_dir:
         adapter_dir = adapter_dir.resolve()
         files = sorted(path for path in adapter_dir.rglob("*") if path.is_file() and path.suffix in {".json", ".bin", ".safetensors"})
@@ -39,13 +41,7 @@ def _parse_json(text: str) -> dict[str, Any]:
     stripped = text.strip()
     if stripped.startswith("```"):
         stripped = re.sub(r"^```(?:json)?\s*|\s*```$", "", stripped, flags=re.IGNORECASE | re.DOTALL)
-    try:
-        parsed = json.loads(stripped)
-    except json.JSONDecodeError:
-        start = stripped.find("{")
-        if start < 0:
-            raise
-        parsed, _ = json.JSONDecoder().raw_decode(stripped[start:])
+    parsed = json.loads(stripped)
     if not isinstance(parsed, dict):
         raise ValueError("model returned a non-object JSON value")
     return normalize_data(parsed)
@@ -61,7 +57,7 @@ def run(
     max_pixels: int,
 ) -> None:
     import torch
-    from transformers import AutoModelForImageTextToText, AutoProcessor
+    from transformers import AutoModelForImageTextToText
 
     try:
         from peft import PeftModel
@@ -72,14 +68,14 @@ def run(
     if not rows:
         raise ValueError(f"No {split} rows in {manifest_path}")
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    run_id = _run_id(model_id, adapter_dir, split, max_pixels, max_new_tokens)
+    run_id = _run_id(model_id, adapter_dir, split, max_pixels, max_new_tokens, manifest_path)
     completed: set[str] = set()
     if output_path.exists():
         previous = _read_jsonl(output_path)
         if any(row.get("run_id") != run_id for row in previous):
             raise ValueError(f"{output_path} belongs to another model/configuration; use a new output path")
         completed = {row.get("doc_id") for row in previous}
-    processor = AutoProcessor.from_pretrained(model_id, min_pixels=28 * 28 * 16, max_pixels=max_pixels)
+    processor = load_processor(model_id, max_pixels)
     model = AutoModelForImageTextToText.from_pretrained(
         model_id, torch_dtype=torch.float16, device_map="auto", attn_implementation="sdpa"
     )
@@ -105,6 +101,8 @@ def run(
             trimmed = generated[:, inputs["input_ids"].shape[-1]:]
             raw = processor.batch_decode(trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
             try:
+                if trimmed.shape[-1] >= max_new_tokens:
+                    raise ValueError(f"generation reached max_new_tokens={max_new_tokens}; output may be truncated")
                 prediction = _parse_json(raw)
                 error = None
             except (ValueError, json.JSONDecodeError) as parse_error:

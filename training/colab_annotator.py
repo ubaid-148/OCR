@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from training.invoice_dataset import load_manifest, new_annotation, normalize_data, validate_annotation
+from training.invoice_dataset import ANNOTATION_VERSION, load_manifest, new_annotation, normalize_data, validate_annotation
 
 
 def _read_candidate(work_dir: Path, record: dict[str, Any]) -> dict[str, Any]:
@@ -14,7 +14,14 @@ def _read_candidate(work_dir: Path, record: dict[str, Any]) -> dict[str, Any]:
     draft = work_dir / "drafts" / f"{record['doc_id']}.json"
     path = label if label.exists() else draft
     if path.exists():
-        return json.loads(path.read_text(encoding="utf-8"))
+        annotation = json.loads(path.read_text(encoding="utf-8"))
+        if annotation.get("annotation_version") != ANNOTATION_VERSION:
+            annotation["data"] = normalize_data(annotation.get("data"))
+            annotation["annotation_version"] = ANNOTATION_VERSION
+            annotation.update(verified=False, include_in_training=False, verified_by=None, verified_at=None)
+            annotation["notes"] = ((annotation.get("notes") or "") +
+                                   "\nMigrated to full-schema v2; every field needs fresh source verification.").strip()
+        return annotation
     return new_annotation(record["source_filename"], record["source_sha256"])
 
 
@@ -27,7 +34,7 @@ def _coerce_editor_json(value: str, record: dict[str, Any]) -> dict[str, Any]:
         annotation["data"] = normalize_data(annotation.get("data"))
     else:
         annotation = new_annotation(record["source_filename"], record["source_sha256"], parsed)
-    annotation["annotation_version"] = "invoice-ocr-annotation-v1"
+    annotation["annotation_version"] = ANNOTATION_VERSION
     annotation["source_filename"] = record["source_filename"]
     annotation["source_sha256"] = record["source_sha256"]
     return annotation

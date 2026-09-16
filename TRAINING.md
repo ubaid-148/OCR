@@ -4,9 +4,9 @@ This repository now contains a source-verified training workflow and the 111 inv
 
 ## Why verification comes before training
 
-The supplied folder contains PDFs but no ground-truth JSON. Existing OCR output and cloud-model output are drafts, not labels. Training on unchecked drafts would teach their mistakes to the model. The workflow therefore refuses to export fewer than 80 human-verified, explicitly included documents and keeps supplier/layout groups out of more than one split.
+The supplied folder contains PDFs but no ground-truth JSON. Existing OCR output and cloud-model output are drafts, not labels. Training on unchecked drafts would teach their mistakes to the model. The workflow therefore refuses to export fewer than 80 human-verified, explicitly included documents and keeps supplier/layout groups out of more than one split. The same PDF hash also stays in one split. Validation and test must each have at least 10 documents at the default 80-label minimum.
 
-The target is layout-independent extraction, not memorizing a supplier template. The SFT record supplies all document pages to a vision-language model and asks for one stable bilingual invoice schema. Supplier VAT or a manually assigned `layout_group` controls leakage-resistant train/validation/test grouping.
+The target is layout-independent extraction, not memorizing a supplier template. The SFT record supplies all document pages to a vision-language model and asks for the app's **full** bilingual invoice schema: seller/customer address and CR fields, supply date, all item columns, VAT summary, totals and other printed fields. The earlier v1 labels omitted many of these fields. Old v1 labels are shown as unverified when opened in the dashboard; they must be checked again against the source before v2 export. Supplier VAT and a manually assigned `layout_group` both constrain leakage-resistant train/validation/test grouping.
 
 ## Phase 1: private dataset
 
@@ -15,7 +15,7 @@ Open [`colab_dataset.ipynb`](https://colab.research.google.com/github/ubaid-148/
 1. Leave `PDF_DIR` blank to use the public PDFs bundled with the repository, or set it to another folder.
 2. Set the private Drive `WORK_DIR` and `VERIFIED_BY` in the configuration cell.
 3. Prepare page images and generate resumable OCR drafts. Drafting uses the existing spatial pipeline in Fast mode; it never marks output as verified.
-4. In the annotation dashboard, compare every field and every item row with the displayed source pages. Use **Verify + include** only for complete ground truth. Use **Verify + exclude** for duplicates, non-invoices, irrecoverably obscured documents, or documents whose source cannot be read reliably.
+4. In the annotation dashboard, compare every field and every item row with the displayed source pages. Check seller versus customer address, all printed rows and columns, handwritten notes, and dates. Use **Verify + include** only for complete ground truth. Use **Verify + exclude** for duplicates, non-invoices, irrecoverably obscured documents, or documents whose source cannot be read reliably. Leave genuinely absent or unreadable fields `null`; do not fill them by arithmetic or by trusting a cloud draft.
 5. Run validation and export. Arithmetic differences are warnings because printed source values must not be silently replaced with calculated values.
 
 The annotator also accepts a pasted app response, debug response, or cloud-style JSON and normalizes it into the training schema. Pasting is only a starting point; source verification is still required.
@@ -26,13 +26,16 @@ Start a fresh GPU runtime and open [`colab_train.ipynb`](https://colab.research.
 
 The notebook follows this order:
 
-1. Evaluate the untouched base model on the validation split.
-2. Train only on the train split.
-3. Evaluate the adapter on validation and require a non-regression gate.
-4. Only after that gate passes, run the base and adapter once on the untouched test split.
-5. Reject the adapter if it regresses, emits invalid JSON, invents more values for null targets, or misses the configured critical/exact-document thresholds.
+1. Verify the export is full-schema v2 and check that every training image/answer fits the configured model and generation token budgets. Qwen's official data collator truncates over-length sequences; training must stop before that happens. [Qwen source](https://github.com/QwenLM/Qwen3-VL/blob/main/qwen-vl-finetune/qwenvl/data/data_processor.py).
+2. Evaluate the untouched base model on the validation split.
+3. Train only on the train split.
+4. Evaluate the adapter on validation and require a non-regression gate.
+5. Only after that gate passes, run the base and adapter once on the untouched test split.
+6. Reject the adapter if it regresses, emits invalid/truncated JSON, misses documents, invents more values for null targets, or misses the configured critical/exact-document thresholds. Item-row exactness is reported separately.
 
-The adapter is not automatically connected to the OCR application. Deployment is a separate step after its held-out report passes. Even a passing report measures this private sample only; it does not prove 100% accuracy on every future format. Production responses must continue to preserve evidence, arithmetic checks, nulls for uncertainty, and `needs_review` when confidence is insufficient.
+The adapter is **not** automatically connected to the OCR application. After a passing final test, cell 10 writes a private `model_artifacts/adapter_approval.json`. To use it, open [`colab_setup.ipynb`](https://colab.research.google.com/github/ubaid-148/OCR/blob/main/colab_setup.ipynb), set `USE_TRAINED_ADAPTER=True` and point `PRIVATE_WORK_DIR` to that same Drive workspace. The notebook checks the approval/metrics again, starts a CUDA-backed adapter service separately from the PaddleOCR environment, and routes Accuracy mode through it. With the option off, the existing stock Ollama path is unchanged. If the adapter fails or returns incomplete JSON, the app falls back to spatial OCR and marks `needs_review`.
+
+A passing gate is necessary but not proof of Cloud-level accuracy or of 100% accuracy on future formats; it is an experimental held-out result on this private sample. Until the dataset is source-verified, Colab training and held-out scores have not happened. Production responses must continue to preserve evidence, arithmetic checks, nulls for uncertainty, and `needs_review` when confidence is insufficient.
 
 ## Command-line tools
 

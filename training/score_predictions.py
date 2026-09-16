@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import unicodedata
@@ -9,7 +10,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
-from training.invoice_dataset import ITEM_KEYS, SECTION_KEYS, normalize_data
+from training.invoice_dataset import ITEM_KEYS, SECTION_KEYS, TOP_TEXT_KEYS, normalize_data
 
 
 def _text(value: Any) -> str | None:
@@ -32,6 +33,18 @@ def _equal(expected: Any, actual: Any) -> bool:
 
 def flatten(data: dict[str, Any]) -> dict[str, Any]:
     result: dict[str, Any] = {}
+    for key in TOP_TEXT_KEYS:
+        result[key] = data.get(key)
+    for key in ("handwritten_notes", "other_fields"):
+        values = data.get(key) if isinstance(data.get(key), list) else []
+        result[f"{key}.count"] = len(values)
+        for index, value in enumerate(values):
+            if key == "other_fields":
+                field = value if isinstance(value, dict) else {}
+                for part in ("label", "value", "page"):
+                    result[f"{key}[{index}].{part}"] = field.get(part)
+            else:
+                result[f"{key}[{index}]"] = value
     for section, keys in SECTION_KEYS.items():
         value = data.get(section) if isinstance(data.get(section), dict) else {}
         for key in keys:
@@ -51,11 +64,20 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
 
 
 def score(manifest_path: Path, predictions_path: Path, split: str = "test") -> dict[str, Any]:
-    targets = {row["doc_id"]: row for row in _read_jsonl(manifest_path) if row.get("split") == split}
-    predictions = {row["doc_id"]: row for row in _read_jsonl(predictions_path)}
+    target_rows = [row for row in _read_jsonl(manifest_path) if row.get("split") == split]
+    targets = {row["doc_id"]: row for row in target_rows}
+    prediction_rows = _read_jsonl(predictions_path)
+    predictions = {row["doc_id"]: row for row in prediction_rows}
+    duplicate_ids = sorted({row["doc_id"] for row in prediction_rows if sum(
+        other["doc_id"] == row["doc_id"] for other in prediction_rows) > 1})
+    missing_ids = sorted(set(targets) - set(predictions))
+    extra_ids = sorted(set(predictions) - set(targets))
     field_correct = field_total = unexpected = exact_documents = parse_failures = 0
     critical_correct = critical_total = 0
-    critical_prefixes = ("invoice.invoice_number", "invoice.date", "supplier.vat_number", "customer.vat_number", "items.row_count", "items[", "totals.")
+    item_rows_correct = item_rows_total = 0
+    critical_prefixes = ("invoice.invoice_number", "invoice.date", "invoice.date_of_supply",
+                         "supplier.name_", "supplier.vat_number", "customer.name", "customer.vat_number",
+                         "customer.address", "items.row_count", "items[", "totals.", "vat_summary.")
     details: list[dict[str, Any]] = []
     for doc_id, row in targets.items():
         prediction_row = predictions.get(doc_id, {})
@@ -65,7 +87,8 @@ def score(manifest_path: Path, predictions_path: Path, split: str = "test") -> d
                 raw_prediction = json.loads(raw_prediction)
             except json.JSONDecodeError:
                 raw_prediction = None
-        if not isinstance(raw_prediction, dict):
+        failed = not isinstance(raw_prediction, dict) or bool(prediction_row.get("error"))
+        if failed:
             parse_failures += 1
             raw_prediction = {}
         expected = flatten(normalize_data(row["target"]))
@@ -86,17 +109,29 @@ def score(manifest_path: Path, predictions_path: Path, split: str = "test") -> d
                 critical_correct += correct
             if not correct:
                 errors.append(path)
-        exact_documents += not errors
+        expected_items = normalize_data(row["target"])["items"]
+        actual_items = normalize_data(raw_prediction)["items"]
+        for index, item in enumerate(expected_items):
+            item_rows_total += 1
+            actual_item = actual_items[index] if index < len(actual_items) else {}
+            item_rows_correct += all(_equal(item.get(key), actual_item.get(key)) for key in ITEM_KEYS)
+        exact_documents += not errors and not failed
         details.append({"doc_id": doc_id, "wrong_fields": errors})
     document_count = len(targets)
     return {
         "split": split,
+        "manifest_sha256": hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
+        "document_ids": sorted(targets),
         "documents": document_count,
         "prediction_documents": len(predictions),
+        "missing_prediction_ids": missing_ids,
+        "extra_prediction_ids": extra_ids,
+        "duplicate_prediction_ids": duplicate_ids,
         "json_parse_failures": parse_failures,
         "field_accuracy_non_null": round(field_correct / field_total, 6) if field_total else None,
         "critical_accuracy_non_null": round(critical_correct / critical_total, 6) if critical_total else None,
         "exact_document_rate": round(exact_documents / document_count, 6) if document_count else None,
+        "item_row_exact_rate": round(item_rows_correct / item_rows_total, 6) if item_rows_total else None,
         "unexpected_values_for_null_targets": unexpected,
         "field_correct": field_correct,
         "field_total": field_total,

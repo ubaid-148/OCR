@@ -1,4 +1,5 @@
 """No OCR/model is run here: tests cover schema, routing and safety decisions."""
+import os
 import unittest
 from unittest.mock import patch
 
@@ -141,6 +142,32 @@ class VisualInvoiceTests(unittest.TestCase):
             result = parse_invoice_visual("unused.pdf", [], "x.pdf", "eng", mode="fast")
         self.assertEqual(result["quality"]["parser"], "spatial_fast")
         render.assert_not_called()
+
+    def test_approved_adapter_reads_all_original_pages_once_and_stays_in_review(self):
+        raw = visual_raw()
+        raw["other_fields"] = [{"label": "Reference", "value": "A-1", "page": 2}]
+        with patch.dict(os.environ, {"TRAINED_VISION_URL": "http://127.0.0.1:8766/extract"}), \
+             patch("visual_invoice.parse_invoice_hybrid", return_value=fallback()), \
+             patch("visual_invoice.render_pages", return_value=[(1, 2, ["PAGE1", "CROP1"]),
+                                                               (2, 2, ["PAGE2", "CROP2"])]), \
+             patch("visual_invoice.request_json", return_value={"prediction": raw, "model_id": "approved-2b"}) as request, \
+             patch("visual_invoice.audit_ai", return_value=([], {})):
+            result = parse_invoice_visual("unused.pdf", [], "9498.pdf", "eng+ara")
+        self.assertEqual(request.call_count, 1)
+        self.assertEqual(request.call_args.args[1]["images"], ["PAGE1", "PAGE2"])
+        self.assertEqual(result["quality"]["parser"], "trained_visual_ai")
+        self.assertEqual(result["quality"]["visual_pages"], 2)
+        self.assertEqual(result["data"]["other_fields"][0]["page"], 2)
+        self.assertTrue(result["quality"]["needs_review"])
+
+    def test_failed_approved_adapter_falls_back_with_error(self):
+        with patch.dict(os.environ, {"TRAINED_VISION_URL": "http://127.0.0.1:8766/extract"}), \
+             patch("visual_invoice.parse_invoice_hybrid", return_value=fallback()), \
+             patch("visual_invoice.render_pages", return_value=[(1, 1, ["PAGE1"])]), \
+             patch("visual_invoice.request_json", return_value={"error": "truncated"}):
+            result = parse_invoice_visual("unused.pdf", [], "9498.pdf", "eng+ara")
+        self.assertEqual(result["quality"]["parser"], "spatial_fallback")
+        self.assertEqual(result["quality"]["local_ai_status"], "failed")
 
     def test_failed_vision_is_not_reported_as_extracted(self):
         with patch("visual_invoice.parse_invoice_hybrid", return_value=fallback()), \

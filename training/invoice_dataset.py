@@ -17,31 +17,33 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Iterable
 
+from visual_invoice import ITEM_NUMBERS, ITEM_TEXT, TEXT_FIELDS, TOTAL_NUMBERS, VAT_NUMBERS
 
-ANNOTATION_VERSION = "invoice-ocr-annotation-v1"
-PROMPT_VERSION = "invoice-json-v1"
+
+ANNOTATION_VERSION = "invoice-ocr-annotation-v2"
+PROMPT_VERSION = "invoice-json-full-v2"
 PROMPT = """Extract every printed invoice field from all supplied page images into one JSON object.
 The document may use any Arabic, English, or bilingual layout. Read labels and spatial relationships; do not assume a supplier template.
-Return exactly these top-level objects: supplier, invoice, customer, items, totals.
-supplier keys: name_ar, name_en, vat_number.
-invoice keys: invoice_number, date, date_of_supply, hijri_date, time, payment_method.
-customer keys: name, vat_number, address.
-Each items entry keys: line_no, item_code, description, quantity, unit, unit_price, amount, vat_amount, discount, gross_amount.
-totals keys: subtotal, discount, vat_rate, vat_amount, net_amount, currency.
-Use JSON null when a value is not printed or genuinely unreadable. Preserve leading zeros and printed spelling. Never calculate a missing source value. amount is the printed pre-tax line amount; gross_amount is the printed line total including VAT. Return JSON only."""
+Return document_type, document_type_ar, handwritten_notes, amount_in_words_ar, supplier, invoice, customer, items, vat_summary, totals and other_fields.
+supplier keys: name_ar, name_en, branch, vat_number, cr_number, building_no, street, area, post_code, additional_no, short_address, country, city.
+invoice keys: invoice_number, date, date_of_supply, hijri_date, time, ref_no, payment_method, page.
+customer keys: customer_code, name, name_ar, name_en, vat_number, cr_number, building_no, street, area, post_code, additional_no, short_address, country, city, address.
+Each items entry keys: line_no, item_code, description, description_ar, description_en, unit, tax_code, quantity, unit_price, discount, amount, tax_rate, vat_amount, gross_amount.
+vat_summary keys: before_tax, tax_amount, inc_tax, tax_code.
+totals keys: subtotal, discount, other_charges, taxable_amount, vat_rate, vat_amount, net_amount, currency.
+other_fields is an array of objects with label, value and one-based page number.
+Use JSON null when a value is not printed or genuinely unreadable; use [] for absent notes/other fields. Preserve leading zeros, source spelling, line order and seller/buyer roles. Never calculate a missing source value. amount is the printed pre-tax line amount; gross_amount is the printed line total including VAT. Return JSON only."""
 
 SECTION_KEYS = {
-    "supplier": ("name_ar", "name_en", "vat_number"),
-    "invoice": ("invoice_number", "date", "date_of_supply", "hijri_date", "time", "payment_method"),
-    "customer": ("name", "vat_number", "address"),
-    "totals": ("subtotal", "discount", "vat_rate", "vat_amount", "net_amount", "currency"),
+    **TEXT_FIELDS,
+    "vat_summary": (*VAT_NUMBERS, "tax_code"),
+    "totals": (*TOTAL_NUMBERS, "currency"),
 }
-ITEM_KEYS = (
-    "line_no", "item_code", "description", "quantity", "unit", "unit_price",
-    "amount", "vat_amount", "discount", "gross_amount",
-)
-NUMERIC_ITEM_KEYS = {"quantity", "unit_price", "amount", "vat_amount", "discount", "gross_amount"}
-NUMERIC_TOTAL_KEYS = {"subtotal", "discount", "vat_rate", "vat_amount", "net_amount"}
+ITEM_KEYS = ("line_no", *ITEM_TEXT, *ITEM_NUMBERS)
+NUMERIC_ITEM_KEYS = set(ITEM_NUMBERS)
+NUMERIC_SECTION_KEYS = {"vat_summary": set(VAT_NUMBERS), "totals": set(TOTAL_NUMBERS)}
+TOP_TEXT_KEYS = ("document_type", "document_type_ar", "amount_in_words_ar")
+TOP_ARRAY_KEYS = ("handwritten_notes", "other_fields")
 
 
 def _sha256(path: Path) -> str:
@@ -61,70 +63,82 @@ def _pick(mapping: dict[str, Any], *keys: str) -> Any:
 
 def empty_data() -> dict[str, Any]:
     return {
-        "supplier": {key: None for key in SECTION_KEYS["supplier"]},
-        "invoice": {key: None for key in SECTION_KEYS["invoice"]},
-        "customer": {key: None for key in SECTION_KEYS["customer"]},
+        **{key: None for key in TOP_TEXT_KEYS},
+        "handwritten_notes": [],
+        **{section: {key: None for key in keys} for section, keys in SECTION_KEYS.items()},
         "items": [],
-        "totals": {key: None for key in SECTION_KEYS["totals"]},
+        "other_fields": [],
     }
 
 
+def _numeric(value: Any, percent: bool = False) -> Any:
+    if isinstance(value, str):
+        cleaned = value.strip().replace(",", "")
+        if percent:
+            cleaned = cleaned.removesuffix("%").strip()
+        try:
+            number = Decimal(cleaned)
+            return float(number) if number.is_finite() else value
+        except InvalidOperation:
+            return value  # The validator will flag unreadable numeric labels.
+    return value
+
+
 def normalize_data(payload: dict[str, Any] | None) -> dict[str, Any]:
-    """Map app/debug/cloud-style output into the single training schema."""
+    """Map app/debug/cloud-style output into the full training schema."""
     payload = payload or {}
     source = payload.get("data") if isinstance(payload.get("data"), dict) else payload
     seller = source.get("supplier") or source.get("seller") or {}
     invoice = source.get("invoice") or source.get("invoice_details") or {}
     customer = source.get("customer") or {}
-    totals = source.get("totals") or source.get("vat_summary") or {}
+    totals = source.get("totals") or {}
+    vat = source.get("vat_summary") or {}
     raw_items = source.get("items") or source.get("line_items") or []
 
     result = empty_data()
-    result["supplier"] = {
-        "name_ar": _pick(seller, "name_ar"),
-        "name_en": _pick(seller, "name_en"),
-        "vat_number": _pick(seller, "vat_number", "tax_code"),
-    }
-    result["invoice"] = {
-        "invoice_number": _pick(invoice, "invoice_number", "invoice_serial"),
-        "date": _pick(invoice, "date", "invoice_date"),
-        "date_of_supply": _pick(invoice, "date_of_supply", "supply_date"),
-        "hijri_date": _pick(invoice, "hijri_date"),
-        "time": _pick(invoice, "time"),
-        "payment_method": _pick(invoice, "payment_method"),
-    }
+    for key in TOP_TEXT_KEYS:
+        result[key] = source.get(key)
+    for key in ("handwritten_notes", "other_fields"):
+        result[key] = source.get(key) if isinstance(source.get(key), list) else []
+    for section, raw in (("supplier", seller), ("invoice", invoice), ("customer", customer),
+                         ("vat_summary", vat), ("totals", totals)):
+        if isinstance(raw, dict):
+            result[section].update({key: raw.get(key) for key in SECTION_KEYS[section]})
+    result["supplier"]["vat_number"] = _pick(seller, "vat_number", "tax_code")
+    result["invoice"]["invoice_number"] = _pick(invoice, "invoice_number", "invoice_serial")
+    result["invoice"]["date"] = _pick(invoice, "date", "invoice_date")
+    result["invoice"]["date_of_supply"] = _pick(invoice, "date_of_supply", "supply_date")
     if isinstance(result["invoice"]["date"], str) and "T" in result["invoice"]["date"]:
         date, time = result["invoice"]["date"].split("T", 1)
         result["invoice"]["date"] = date
         result["invoice"]["time"] = result["invoice"]["time"] or time
-    result["customer"] = {
-        "name": _pick(customer, "name", "name_ar", "name_en"),
-        "vat_number": _pick(customer, "vat_number", "tax_code"),
-        "address": _pick(customer, "address", "short_address"),
-    }
+    result["customer"]["customer_code"] = _pick(customer, "customer_code", "cus_code")
+    result["customer"]["name"] = _pick(customer, "name", "name_ar", "name_en")
+    result["customer"]["vat_number"] = _pick(customer, "vat_number", "tax_code")
     for index, item in enumerate(raw_items if isinstance(raw_items, list) else []):
         if not isinstance(item, dict):
             continue
-        result["items"].append({
-            "line_no": _pick(item, "line_no") or index + 1,
-            "item_code": _pick(item, "item_code", "item_id"),
-            "description": _pick(item, "description", "item_name_ar", "item_name_en"),
-            "quantity": _pick(item, "quantity"),
-            "unit": _pick(item, "unit"),
-            "unit_price": _pick(item, "unit_price"),
-            "amount": _pick(item, "amount", "taxable_amount"),
-            "vat_amount": _pick(item, "vat_amount", "tax_amount"),
-            "discount": _pick(item, "discount"),
-            "gross_amount": _pick(item, "gross_amount", "total_incl_vat"),
-        })
-    result["totals"] = {
-        "subtotal": _pick(totals, "subtotal", "total_excluding_vat", "before_tax"),
-        "discount": _pick(totals, "discount"),
-        "vat_rate": _pick(totals, "vat_rate"),
-        "vat_amount": _pick(totals, "vat_amount", "total_vat", "tax_amount"),
-        "net_amount": _pick(totals, "net_amount", "total_amount_including_vat", "inc_tax"),
-        "currency": _pick(totals, "currency"),
-    }
+        row = {key: item.get(key) for key in ITEM_KEYS}
+        row["line_no"] = item.get("line_no", index + 1)
+        row["item_code"] = _pick(item, "item_code", "item_id")
+        row["description"] = _pick(item, "description", "item_name_ar", "item_name_en")
+        row["description_ar"] = _pick(item, "description_ar", "item_name_ar")
+        row["description_en"] = _pick(item, "description_en", "item_name_en")
+        row["amount"] = _pick(item, "amount", "taxable_amount")
+        row["vat_amount"] = _pick(item, "vat_amount", "tax_amount")
+        row["gross_amount"] = _pick(item, "gross_amount", "total_incl_vat")
+        for key in NUMERIC_ITEM_KEYS:
+            row[key] = _numeric(row[key], key == "tax_rate")
+        result["items"].append(row)
+    result["vat_summary"]["before_tax"] = _numeric(_pick(vat, "before_tax"))
+    result["vat_summary"]["tax_amount"] = _numeric(_pick(vat, "tax_amount"))
+    result["vat_summary"]["inc_tax"] = _numeric(_pick(vat, "inc_tax"))
+    result["totals"]["subtotal"] = _pick(totals, "subtotal", "total_excluding_vat")
+    result["totals"]["taxable_amount"] = _pick(totals, "taxable_amount", "total_taxable_amount_excluding_vat")
+    result["totals"]["vat_amount"] = _pick(totals, "vat_amount", "total_vat")
+    result["totals"]["net_amount"] = _pick(totals, "net_amount", "total_amount_including_vat")
+    for key in NUMERIC_SECTION_KEYS["totals"]:
+        result["totals"][key] = _numeric(result["totals"][key], key == "vat_rate")
     return result
 
 
@@ -171,9 +185,33 @@ def validate_annotation(annotation: dict[str, Any], require_verified: bool = Fal
         errors.append("annotation is not verified")
     if annotation.get("verified") is True and not str(annotation.get("verified_by") or "").strip():
         errors.append("verified_by is required when verified=true")
+    if annotation.get("verified") is True and not str(annotation.get("verified_at") or "").strip():
+        errors.append("verified_at is required when verified=true")
     data = annotation.get("data")
     if not isinstance(data, dict):
         return errors + ["data must be an object"], warnings
+    allowed = set(SECTION_KEYS) | set(TOP_TEXT_KEYS) | set(TOP_ARRAY_KEYS) | {"items"}
+    unknown_top = sorted(set(data) - allowed)
+    if unknown_top:
+        errors.append(f"data has unsupported keys: {', '.join(unknown_top)}")
+    for key in TOP_TEXT_KEYS:
+        if key not in data:
+            errors.append(f"data.{key} is missing")
+        elif data[key] is not None and not isinstance(data[key], str):
+            errors.append(f"data.{key} must be a string or null")
+    notes = data.get("handwritten_notes")
+    if not isinstance(notes, list) or any(not isinstance(value, str) for value in notes):
+        errors.append("data.handwritten_notes must be an array of strings")
+    other = data.get("other_fields")
+    if not isinstance(other, list):
+        errors.append("data.other_fields must be an array")
+    else:
+        for index, field in enumerate(other):
+            if (not isinstance(field, dict) or set(field) != {"label", "value", "page"}
+                    or any(not isinstance(field.get(key), str) or not field[key].strip() for key in ("label", "value"))
+                    or not isinstance(field.get("page"), int) or isinstance(field.get("page"), bool)
+                    or field["page"] < 1):
+                errors.append(f"data.other_fields[{index}] must have non-empty label/value and positive integer page")
     for section, keys in SECTION_KEYS.items():
         value = data.get(section)
         if not isinstance(value, dict):
@@ -185,9 +223,9 @@ def validate_annotation(annotation: dict[str, Any], require_verified: bool = Fal
         for key in keys:
             if key not in value:
                 errors.append(f"data.{section}.{key} is missing")
-            elif key in NUMERIC_TOTAL_KEYS and not _is_number(value[key]):
+            elif key in NUMERIC_SECTION_KEYS.get(section, set()) and not _is_number(value[key]):
                 errors.append(f"data.{section}.{key} must be a number or null")
-            elif key not in NUMERIC_TOTAL_KEYS and value[key] is not None and not isinstance(value[key], str):
+            elif key not in NUMERIC_SECTION_KEYS.get(section, set()) and value[key] is not None and not isinstance(value[key], str):
                 errors.append(f"data.{section}.{key} must be a string or null")
     items = data.get("items")
     if not isinstance(items, list):
@@ -213,6 +251,8 @@ def validate_annotation(annotation: dict[str, Any], require_verified: bool = Fal
 
     if not items:
         warnings.append("invoice has no item rows")
+    if annotation.get("include_in_training") is True and annotation.get("verified") is not True:
+        errors.append("include_in_training=true requires verified=true")
     invoice = data.get("invoice") if isinstance(data.get("invoice"), dict) else {}
     totals = data.get("totals") if isinstance(data.get("totals"), dict) else {}
     for field in ("invoice_number", "date"):
@@ -249,6 +289,12 @@ def _inside_git_worktree(path: Path) -> bool:
     return any((candidate / ".git").exists() for candidate in (path, *path.parents))
 
 
+def _inside_project_tree(path: Path) -> bool:
+    root = Path(__file__).resolve().parents[1]
+    path = path.resolve()
+    return path == root or root in path.parents
+
+
 def _safe_id(path: Path, digest: str, used: set[str]) -> str:
     base = re.sub(r"[^A-Za-z0-9_.-]+", "-", path.stem).strip("-.") or "invoice"
     result = base
@@ -266,9 +312,9 @@ def prepare_workspace(
     except ImportError as error:
         raise RuntimeError("pypdfium2 is required: pip install pypdfium2") from error
     pdf_dir, work_dir = pdf_dir.resolve(), work_dir.resolve()
-    if _inside_git_worktree(work_dir):
+    if _inside_git_worktree(work_dir) or _inside_project_tree(work_dir):
         raise ValueError("WORK_DIR must stay outside a Git worktree to prevent labels and weights entering public commits")
-    if _inside_git_worktree(pdf_dir) and not allow_public_pdf_dir:
+    if (_inside_git_worktree(pdf_dir) or _inside_project_tree(pdf_dir)) and not allow_public_pdf_dir:
         raise ValueError("PDF_DIR is inside a Git worktree; pass --allow-public-pdf-dir only for intentionally public PDFs")
     work_dir.mkdir(parents=True, exist_ok=True)
     for name in ("images", "drafts", "labels", "exports", "failures"):
@@ -416,24 +462,45 @@ def validation_report(work_dir: Path) -> dict[str, Any]:
     }
 
 
-def _group_key(entry: dict[str, Any]) -> str:
+def _group_keys(entry: dict[str, Any]) -> tuple[str, ...]:
+    """Both layout and supplier identity constrain a split, even when both exist."""
     annotation = entry["annotation"]
     explicit = str(annotation.get("layout_group") or "").strip().casefold()
-    if explicit:
-        return f"layout:{explicit}"
     supplier = annotation["data"]["supplier"]
     vat = re.sub(r"\D", "", str(supplier.get("vat_number") or ""))
-    if vat:
-        return f"vat:{vat}"
     name = " ".join(str(supplier.get(key) or "") for key in ("name_ar", "name_en"))
     name = " ".join(name.casefold().split())
-    return f"supplier:{name}" if name else f"document:{entry['source_sha256']}"
+    keys = ([f"layout:{explicit}"] if explicit else []) + ([f"vat:{vat}"] if vat else [])
+    keys.append(f"hash:{entry['source_sha256']}")
+    if not vat and name:
+        keys.append(f"supplier:{name}")
+    return tuple(keys)
 
 
 def split_entries(entries: list[dict[str, Any]], seed: str = "invoice-ocr-v1") -> dict[str, list[dict[str, Any]]]:
+    # Connected components close the loophole where a supplier has multiple
+    # layout_group values or one layout spans multiple suppliers.
+    parent = list(range(len(entries)))
+    def find(index: int) -> int:
+        while parent[index] != index:
+            parent[index] = parent[parent[index]]
+            index = parent[index]
+        return index
+    owners: dict[str, int] = {}
+    for index, entry in enumerate(entries):
+        for key in _group_keys(entry):
+            if key in owners:
+                parent[find(index)] = find(owners[key])
+            else:
+                owners[key] = index
+    component_keys: dict[int, set[str]] = defaultdict(set)
+    for index, entry in enumerate(entries):
+        component_keys[find(index)].update(_group_keys(entry))
     groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for entry in entries:
-        groups[_group_key(entry)].append(entry)
+    for index, entry in enumerate(entries):
+        root = find(index)
+        key = min(component_keys[root])
+        groups[key].append(entry)
     if len(groups) < 3:
         raise ValueError("At least three independent supplier/layout groups are required for train/validation/test")
     total = len(entries)
@@ -466,10 +533,19 @@ def export_qwen(work_dir: Path, min_verified: int = 80, seed: str = "invoice-ocr
         raise ValueError("Label validation failed:\n" + "\n".join(problems[:30]))
     if len(entries) < min_verified:
         raise ValueError(f"Only {len(entries)} verified/included documents; at least {min_verified} are required")
+    changed_sources = [entry["source_filename"] for entry in entries
+                       if not Path(entry["source_path"]).exists()
+                       or _sha256(Path(entry["source_path"])) != entry["source_sha256"]]
+    if changed_sources:
+        raise ValueError(f"Source PDF missing or changed since verification: {changed_sources[0]}")
     missing_images = [path for entry in entries for path in entry["pages"] if not Path(path).exists()]
     if missing_images:
         raise ValueError(f"Rendered page image is missing: {missing_images[0]}")
     splits = split_entries(entries, seed)
+    minimum_held_out = max(1, min_verified // 8)
+    for split in ("validation", "test"):
+        if len(splits[split]) < minimum_held_out:
+            raise ValueError(f"{split} has only {len(splits[split])} documents; need at least {minimum_held_out}. Add independent supplier/layout groups.")
     exports = work_dir / "exports"
     exports.mkdir(exist_ok=True)
     manifest_rows: list[dict[str, Any]] = []
@@ -487,6 +563,7 @@ def export_qwen(work_dir: Path, min_verified: int = 80, seed: str = "invoice-ocr
         "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in manifest_rows), encoding="utf-8"
     )
     summary = {
+        "annotation_version": ANNOTATION_VERSION,
         "prompt_version": PROMPT_VERSION,
         "seed": seed,
         "counts": {key: len(value) for key, value in splits.items()},

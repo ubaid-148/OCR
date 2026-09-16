@@ -4,7 +4,7 @@ import urllib.error
 import urllib.request
 
 
-def request_json(url, payload, timeout):
+def request_json(url, payload, timeout, service="Ollama"):
     request = urllib.request.Request(
         url, data=json.dumps(payload).encode("utf-8"),
         headers={"Content-Type": "application/json"},
@@ -20,11 +20,11 @@ def request_json(url, payload, timeout):
             detail = str(parsed.get("error", detail)) if isinstance(parsed, dict) else detail
         except ValueError:
             pass
-        raise RuntimeError(f"Ollama HTTP {error.code}: {detail or error.reason}") from error
+        raise RuntimeError(f"{service} HTTP {error.code}: {detail or error.reason}") from error
     if not isinstance(result, dict):
-        raise ValueError("Ollama returned a non-object response")
+        raise ValueError(f"{service} returned a non-object response")
     if result.get("error"):
-        raise RuntimeError(f"Ollama: {result['error']}")
+        raise RuntimeError(f"{service}: {result['error']}")
     return result
 
 
