@@ -1,6 +1,7 @@
 import copy
 import io
 import json
+import os
 import unittest
 from contextlib import closing
 from unittest.mock import patch
@@ -9,11 +10,18 @@ from invoice_formatter import parse_invoice
 from invoice_response import clean_invoice_response
 from local_ai_parser import parse_invoice_hybrid, _validate
 from native_pdf import extract_native_words
-from ocr_web import Handler
+from ocr_web import Handler, accuracy_gpu_configured
 from test_invoice_evidence import sample, pages
 
 
 class FlowTests(unittest.TestCase):
+    def test_accuracy_mode_refuses_cpu_when_colab_requires_gpu(self):
+        with patch.dict(os.environ, {'VISION_REQUIRE_GPU': 'true', 'OCR_DEVICE': 'cpu'}):
+            self.assertFalse(accuracy_gpu_configured('auto'))
+            self.assertTrue(accuracy_gpu_configured('fast'))
+        with patch.dict(os.environ, {'VISION_REQUIRE_GPU': 'true', 'OCR_DEVICE': 'gpu:0'}):
+            self.assertTrue(accuracy_gpu_configured('auto'))
+
     def test_absent_currency_and_rate_are_not_assumed(self):
         totals = parse_invoice([], "empty.pdf", "eng")["data"]["totals"]
         self.assertIsNone(totals["currency"])

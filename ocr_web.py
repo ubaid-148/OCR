@@ -34,6 +34,12 @@ PROGRESS = {}
 UPLOAD_SLOT = threading.BoundedSemaphore(1)
 
 
+def accuracy_gpu_configured(mode: str) -> bool:
+    if mode != "auto" or os.environ.get("VISION_REQUIRE_GPU", "false").lower() not in {"true", "1", "yes"}:
+        return True
+    return os.environ.get("OCR_DEVICE", "").lower().startswith("gpu")
+
+
 def normalize_digits(value: str) -> str:
     table = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789")
     return value.translate(table).replace(",", ".")
@@ -173,6 +179,9 @@ class Handler(BaseHTTPRequestHandler):
         format_part = next((part for part in message.iter_attachments() if part.get_param("name", header="content-disposition") == "format"), None)
         mode_part = next((part for part in message.iter_attachments() if part.get_param("name", header="content-disposition") == "mode"), None)
         mode = "auto" if mode_part and mode_part.get_content().strip() == "auto" else "fast"
+        if not accuracy_gpu_configured(mode):
+            self.send_failure("Accuracy mode needs a GPU. In Colab select Runtime > Change runtime type > T4 GPU, reconnect, and rerun all cells; Fast mode remains available on CPU.", 400)
+            return
         if pdf_part is None:
             self.send_failure("No PDF was received.", 400)
             return

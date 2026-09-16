@@ -43,7 +43,7 @@ Open <http://127.0.0.1:8765> and upload a PDF invoice.
 
 ## Google Colab
 
-[Open the setup notebook in Colab](https://colab.research.google.com/github/ubaid-148/OCR/blob/main/colab_setup.ipynb), select **Runtime > Change runtime type > T4 GPU**, then **Runtime > Run all**. The public repository needs no token. The notebook installs Paddle in an isolated environment and pulls Qwen3-VL 4B into Ollama. Accuracy mode reads every original PDF page even when spatial OCR appears complete; Fast skips vision. The first setup downloads models. A T4 may still be slower than a cloud service, and this release needs a Colab accuracy/latency benchmark before any production claim.
+[Open the setup notebook in Colab](https://colab.research.google.com/github/ubaid-148/OCR/blob/main/colab_setup.ipynb), select **Runtime > Change runtime type > T4 GPU**, reconnect, then **Runtime > Run all**. The public repository needs no token. The notebook checks for an attached GPU **before installing packages** and stops if none is available; it also requires Ollama's vision model to preload fully on GPU. This prevents the observed CPU run (`117s` OCR plus a `180s` vision timeout) from being mistaken for an accuracy test. The notebook installs Paddle in an isolated environment and pulls Qwen3-VL 4B into Ollama. Accuracy mode reads every original PDF page even when spatial OCR appears complete; Fast skips vision. A T4 may still be slower than a cloud service, and this release needs a Colab accuracy/latency benchmark before any production claim.
 
 Cell 6 automatically runs one real `9498.pdf` regression through the Colab app
 and prints pass/fail for known invoice identifiers, all three item rows, totals,
