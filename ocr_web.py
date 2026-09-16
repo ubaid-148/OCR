@@ -40,42 +40,6 @@ def accuracy_gpu_configured(mode: str) -> bool:
     return os.environ.get("OCR_DEVICE", "").lower().startswith("gpu")
 
 
-def normalize_digits(value: str) -> str:
-    table = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789")
-    return value.translate(table).replace(",", ".")
-
-
-def invoice_candidates(text: str) -> dict[str, object]:
-    normalized = normalize_digits(text)
-    vat_numbers = list(dict.fromkeys(__import__("re").findall(r"(?<!\d)\d{15}(?!\d)", normalized)))
-    dates = __import__("re").findall(r"(?<!\d)(?:0?[1-9]|[12]\d|3[01])[/-](?:0?[1-9]|1[0-2])[/-](?:20\d{2}|14\d{2})(?!\d)", normalized)
-    times = __import__("re").findall(r"(?<!\d)(?:[01]?\d|2[0-3]):[0-5]\d(?!\d)", normalized)
-    item_codes = list(dict.fromkeys(__import__("re").findall(r"(?<!\d)\d{7}(?!\d)", normalized)))
-    decimals = [float(value) for value in __import__("re").findall(r"(?<!\d)\d{1,6}[.]\d{2}(?!\d)", normalized)]
-    invoice_numbers = __import__("re").findall(
-        r"(?i)(?:invoice|فاتورة|رقم)\D{0,24}(\d{4,10})(?!\d)", normalized
-    )
-    data = {
-        "supplier_vat_no": vat_numbers[0] if vat_numbers else None,
-        "customer_vat_no": vat_numbers[1] if len(vat_numbers) > 1 else None,
-        "invoice_no": invoice_numbers[0] if invoice_numbers else None,
-        "date_candidates": dates,
-        "time_candidates": times,
-        "item_code_candidates": item_codes,
-        "decimal_candidates": decimals,
-    }
-    required = ["supplier_vat_no", "customer_vat_no", "invoice_no", "date_candidates", "item_code_candidates"]
-    missing = [field for field in required if not data[field]]
-    checks: dict[str, object] = {"critical_fields_present": not missing, "missing_fields": missing}
-    if len(decimals) >= 3:
-        checks["arithmetic_candidates"] = {
-            "quantity_times_unit_price": "not reliably inferable from plain OCR",
-            "candidate_decimals": decimals,
-        }
-    checks["status"] = "needs_review" if missing else "candidate_only_review_required"
-    return {"candidates": data, "validation": checks}
-
-
 def page(message: str = "") -> bytes:
     safe_message = f'<p class="message">{html.escape(message)}</p>' if message else ""
     return f"""<!doctype html>
@@ -205,7 +169,6 @@ class Handler(BaseHTTPRequestHandler):
                 PROGRESS[progress_id] = message
         input_path = UPLOAD_DIR / f"{job_id}-input.pdf"
         output_path = UPLOAD_DIR / f"{job_id}-searchable.pdf"
-        sidecar_path = UPLOAD_DIR / f"{job_id}-ocr.txt"
         coordinate_path = UPLOAD_DIR / f"{job_id}-coordinates.json"
         pdf_bytes=pdf_part.get_payload(decode=True) or b''
         if not pdf_bytes.startswith(b'%PDF-'):
@@ -218,7 +181,7 @@ class Handler(BaseHTTPRequestHandler):
         command = [
             str(OCR_EXE), "-l", languages, "--rasterizer", "pypdfium",
             "--pdf-renderer", "fpdf2", "--rotate-pages", "--deskew",
-            "--oversample", "300", "--output-type", "pdf", "--sidecar", str(sidecar_path), "--force-ocr",
+            "--oversample", "300", "--output-type", "pdf", "--force-ocr",
             str(input_path), str(output_path),
         ]
         try:
@@ -241,7 +204,6 @@ class Handler(BaseHTTPRequestHandler):
                     from coordinate_ocr import extract_pdf
                     coordinate_payload = extract_pdf(input_path, languages, progress=progress)
                 ocr_finished = perf_counter()
-                raw_text = "\n".join(item.get("text", "") for item in coordinate_payload["pages"])
                 payload: dict[str, object] = {
                     "source_filename": filename,
                     "language": languages,
@@ -265,8 +227,7 @@ class Handler(BaseHTTPRequestHandler):
                     "total": round(perf_counter() - started, 3),
                 }
                 payload["ocr_device"] = coordinate_payload.get("device", "unknown")
-                payload["pipeline_version"] = ("2026-09-trained-gated-v13" if os.environ.get("TRAINED_VISION_URL")
-                                               else "2026-09-evidence-gated-v12")
+                payload["pipeline_version"] = "2026-09-evidence-gated-v12"
                 payload["schema_version"] = "1.0"
                 payload["status"] = payload.get("quality", {}).get("overall_status", "extracted")
                 payload["extraction_methods"] = [p.get("extraction_method", "ocr") for p in coordinate_payload["pages"]]
@@ -276,31 +237,6 @@ class Handler(BaseHTTPRequestHandler):
             if result.returncode != 0 or not output_path.exists():
                 detail = (result.stderr or result.stdout or "OCR failed").strip()
                 self.send_failure(f"OCR failed:\n{detail}", 500)
-                return
-            if output_format in {"json", "invoice"}:
-                raw_text = sidecar_path.read_text(encoding="utf-8", errors="replace")
-                page_texts = raw_text.split("\f")
-                if page_texts and not page_texts[-1].strip():
-                    page_texts.pop()
-                payload = {
-                    "source_filename": filename,
-                    "language": languages,
-                    "engine": "tesseract via OCRmyPDF",
-                    "pages": [
-                        {"page": index, "text": text.strip()}
-                        for index, text in enumerate(page_texts, start=1)
-                    ],
-                }
-                if output_format == "invoice":
-                    payload["document_type"] = "invoice"
-                    payload["extraction"] = invoice_candidates(raw_text)
-                data = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json; charset=utf-8")
-                self.send_header("Content-Disposition", f'inline; filename="{Path(filename).stem}-ocr.json"')
-                self.send_header("Content-Length", str(len(data)))
-                self.end_headers()
-                self.wfile.write(data)
                 return
             data = output_path.read_bytes()
             self.send_response(200)
@@ -318,7 +254,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_failure(f"OCR failed: {error}", 500)
         finally:
             PROGRESS.pop(progress_id, None)
-            for path in (input_path, output_path, sidecar_path, coordinate_path):
+            for path in (input_path, output_path, coordinate_path):
                 try:
                     path.unlink(missing_ok=True)
                 except OSError:

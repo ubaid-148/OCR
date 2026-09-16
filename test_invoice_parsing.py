@@ -1,4 +1,3 @@
-import os
 import unittest
 from unittest.mock import patch
 
@@ -40,31 +39,23 @@ class InvoiceParsingTests(unittest.TestCase):
         result = parse_invoice(pages, "sample.pdf", "eng+ara")
         self.assertEqual(result["data"]["supplier"]["name_ar"], "مؤسسة للتجارة")
 
-    def test_balanced_attempts_ai_for_missing_items(self):
-        with patch.dict(os.environ, {"USE_LOCAL_AI": "true"}), \
-             patch("local_ai_parser._ask_ollama", side_effect=OSError("offline")) as ai:
-            result = parse_invoice_hybrid([], "sample.pdf", "eng+ara")
-        ai.assert_called_once()
+    def test_missing_items_remain_in_spatial_review(self):
+        result = parse_invoice_hybrid([], "sample.pdf", "eng+ara")
         self.assertTrue(result["quality"]["needs_review"])
-        self.assertEqual(result["quality"]["parser"], "spatial_fallback")
+        self.assertEqual(result["quality"]["parser"], "spatial_fast")
 
-    def test_fast_does_not_call_ai_and_explains_incomplete_output(self):
-        with patch("local_ai_parser._ask_ollama") as ai:
-            result = parse_invoice_hybrid([], "sample.pdf", "eng+ara", mode="fast")
-        ai.assert_not_called()
+    def test_fast_explains_incomplete_output(self):
+        result = parse_invoice_hybrid([], "sample.pdf", "eng+ara", mode="fast")
         self.assertIn("review_message", result["quality"])
 
-    def test_complete_source_mismatch_does_not_call_ai(self):
+    def test_complete_source_mismatch_stays_spatial(self):
         data=sample()
         data['items'][0]['vat_amount'] += .01
         legacy={'data':data,'quality':{'low_confidence_fields':[]}}
-        with patch.dict(os.environ, {"USE_LOCAL_AI": "true"}), \
-             patch('local_ai_parser.parse_invoice',return_value=legacy), \
-             patch('local_ai_parser.parse_layout',return_value=None), \
-             patch('local_ai_parser._ask_ollama') as ai:
+        with patch('local_ai_parser.parse_invoice',return_value=legacy), \
+             patch('local_ai_parser.parse_layout',return_value=None):
             result=parse_invoice_hybrid(pages(),'example.pdf','eng+ara')
-        ai.assert_not_called()
-        self.assertEqual(result['quality']['local_ai_status'],'skipped_source_only_review')
+        self.assertEqual(result['quality']['parser'],'spatial_fast')
 
 
 if __name__ == "__main__":

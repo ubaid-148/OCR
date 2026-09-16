@@ -45,18 +45,27 @@ Open <http://127.0.0.1:8765> and upload a PDF invoice.
 
 [Open the setup notebook in Colab](https://colab.research.google.com/github/ubaid-148/OCR/blob/main/colab_setup.ipynb), select **Runtime > Change runtime type > T4 GPU**, reconnect, then **Runtime > Run all**. The public repository needs no token. The notebook checks for an attached GPU **before installing packages** and stops if none is available; it also requires Ollama's vision model to preload fully on GPU. This prevents the observed CPU run (`117s` OCR plus a `180s` vision timeout) from being mistaken for an accuracy test. The notebook installs Paddle in an isolated environment and pulls Qwen3-VL 4B into Ollama. Accuracy mode reads every original PDF page even when spatial OCR appears complete; Fast skips vision. A T4 may still be slower than a cloud service, and this release needs a Colab accuracy/latency benchmark before any production claim.
 
-Cell 6 automatically runs one real `9498.pdf` regression through the Colab app
-and prints pass/fail for known invoice identifiers, all three item rows, totals,
-and runtime. Disable `RUN_9498_CHECK` to skip it. The v11 GPU result passed only
-6/17 checks despite returning `parser=visual_ai`; v12 gates incomplete financial
-rows as `visual_spatial_review` and never treats a partial score as accuracy.
-This single-document check does not establish accuracy across other layouts.
+The later notebook cells run an optional raw OCR diagnostic on `9498.pdf`, save
+its text boxes, compare preprocessing variants, and produce an evidence-based
+error-attribution report. That numeric reference is user-supplied, not a
+source-verified training label. A single document does not establish accuracy
+across other layouts.
 
-## Public multi-layout training
+The final notebook cell offers a separate Stage 1 OCR parameter sweep. It is
+disabled by default because it performs 12 additional OCR passes. Set
+`RUN_STAGE1_SWEEP=True` and run that cell after Colab setup to compare 200/300/400
+DPI against side limits 960/1600/2400/3200 on page 1. Each pass saves its
+PaddleOCR version, constructor/predict arguments, detector-reported parameters,
+image dimensions, recognition metrics, and latency under `benchmark_outputs/`.
+No production OCR default changes until these results are reviewed.
 
-The repository includes a separate two-notebook training workflow for unrelated invoice layouts. Use [colab_dataset.ipynb](https://colab.research.google.com/github/ubaid-148/OCR/blob/main/colab_dataset.ipynb) to create OCR drafts, then **manually verify every field against the page** before export. [colab_train.ipynb](https://colab.research.google.com/github/ubaid-148/OCR/blob/main/colab_train.ipynb) trains a Qwen3-VL 2B LoRA experiment from those verified labels. See [TRAINING.md](TRAINING.md). The current Colab inference model is the stock Qwen3-VL 4B, **not** that adapter; uploading PDFs alone did not train or deploy a model.
+## No training workflow
 
-The 111 PDFs in `public_invoice_pdfs/` were explicitly authorized by the user for public distribution. Source-verified labels are intentionally pushed to public `public_invoice_labels/`; rendered pages and drafts remain temporary in Colab, while passing adapters are published only as GitHub Release assets. OCR/model output is only a draft: training export requires at least 80 explicitly verified documents. A trained adapter is rejected if it regresses on held-out critical fields, invalid JSON, exact-document accuracy, or unsupported-value behavior. Passing a test set is not a 100% guarantee for unseen formats, so evidence validation and `needs_review` remain required.
+This repository does not train or fine-tune a model. The 111 PDFs in
+`public_invoice_pdfs/` were explicitly authorized for public distribution and
+are source documents for Colab diagnostics, not verified labels. OCR and stock
+vision outputs remain drafts: arithmetic, positioned evidence, and
+`needs_review` are required before using extracted financial data.
 
 ## Flow
 

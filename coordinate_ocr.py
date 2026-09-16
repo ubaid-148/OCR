@@ -82,14 +82,13 @@ def extract_words(result: object) -> list[dict[str, object]]:
     return words
 
 
-def _get_model(paddle_language: str):
-    if paddle_language in _MODELS:
-        return _MODELS[paddle_language]
+def ocr_model_kwargs(paddle_language: str) -> dict[str, object]:
+    """Current production PaddleOCR constructor settings (no sweep overrides)."""
     recognition_model = (
         "PP-OCRv5_mobile_rec" if paddle_language == "en"
         else "arabic_PP-OCRv5_mobile_rec"
     )
-    ocr = PaddleOCR(
+    return dict(
         device=get_ocr_device(),
         cpu_threads=max(1, min(4, os.cpu_count() or 1)),
         text_detection_model_name="PP-OCRv5_mobile_det",
@@ -99,6 +98,12 @@ def _get_model(paddle_language: str):
         use_textline_orientation=False,
         enable_mkldnn=False,
     )
+
+
+def _get_model(paddle_language: str):
+    if paddle_language in _MODELS:
+        return _MODELS[paddle_language]
+    ocr = PaddleOCR(**ocr_model_kwargs(paddle_language))
     _MODELS[paddle_language] = ocr
     return ocr
 

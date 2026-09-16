@@ -1,53 +1,12 @@
 from __future__ import annotations
 
-import json
-import os
-import urllib.error
-import urllib.request
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any
 
 from invoice_formatter import parse_invoice
 from layout_invoice import parse_layout, table
 from invoice_evidence import audit_ai
-from ollama_http import request_json
 from document_regions import invoice_words
-
-
-OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434/api/chat")
-OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5:3b")
-
-INVOICE_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "supplier": {"type": "object", "properties": {
-            "name_ar": {"type": ["string", "null"]}, "name_en": {"type": ["string", "null"]},
-            "vat_number": {"type": ["string", "null"]}}, "required": ["name_ar", "name_en", "vat_number"]},
-        "invoice": {"type": "object", "properties": {
-            "invoice_number": {"type": ["string", "null"]}, "date": {"type": ["string", "null"]},
-            "date_of_supply": {"type": ["string", "null"]},
-            "hijri_date": {"type": ["string", "null"]}, "time": {"type": ["string", "null"]},
-            "payment_method": {"type": ["string", "null"]}},
-            "required": ["invoice_number", "date", "date_of_supply", "hijri_date", "time", "payment_method"]},
-        "customer": {"type": "object", "properties": {
-            "name": {"type": ["string", "null"]}, "vat_number": {"type": ["string", "null"]},
-            "address": {"type": ["string", "null"]}}, "required": ["name", "vat_number", "address"]},
-        "items": {"type": "array", "items": {"type": "object", "properties": {
-            "line_no": {"type": "integer"}, "item_code": {"type": ["string", "null"]},
-            "description": {"type": ["string", "null"]}, "quantity": {"type": ["number", "null"]},
-            "unit": {"type": ["string", "null"]},
-            "unit_price": {"type": ["number", "null"]}, "amount": {"type": ["number", "null"]},
-            "vat_amount": {"type": ["number", "null"]}, "discount": {"type": ["number", "null"]},
-            "gross_amount": {"type": ["number", "null"]}},
-            "required": ["line_no", "item_code", "description", "quantity", "unit", "unit_price", "amount"]}},
-        "totals": {"type": "object", "properties": {
-            "subtotal": {"type": ["number", "null"]}, "discount": {"type": ["number", "null"]},
-            "vat_rate": {"type": ["number", "null"]}, "vat_amount": {"type": ["number", "null"]},
-            "net_amount": {"type": ["number", "null"]}, "currency": {"type": ["string", "null"]}},
-            "required": ["subtotal", "discount", "vat_rate", "vat_amount", "net_amount", "currency"]},
-    },
-    "required": ["supplier", "invoice", "customer", "items", "totals"],
-}
 
 
 def _decimal(value: Any) -> Decimal | None:
@@ -132,65 +91,9 @@ def _validate(data: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
     quality = {
         "overall_status": "checks_passed" if not needs_review else "needs_review",
         "needs_review": needs_review, "missing_fields": missing,
-        "low_confidence_fields": [], "parser": "local_ai",
-        "model": OLLAMA_MODEL,
+        "low_confidence_fields": [], "parser": "spatial_fast",
     }
     return validation, quality
-
-
-def _compact_ocr(pages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    compact = []
-    for page in pages:
-        width_px = float(page.get("width", 1)) * float(page.get("render_dpi", 200)) / 72
-        height_px = float(page.get("height", 1)) * float(page.get("render_dpi", 200)) / 72
-        compact.append({
-            "page": page.get("page"),
-            "boxes": [[
-                round(float(word.get("left", 0)) / width_px * 1000),
-                round(float(word.get("top", 0)) / height_px * 1000),
-                round(float(word.get("width", 0)) / width_px * 1000),
-                round(float(word.get("height", 0)) / height_px * 1000),
-                word.get("text", ""),
-            ] for word in sorted(page.get("words", []), key=lambda w: (float(w.get("top", 0)), float(w.get("left", 0))))],
-        })
-    return compact
-
-
-def _ask_ollama(pages: list[dict[str, Any]]) -> dict[str, Any]:
-    prompt = (
-        "Extract this invoice into the required JSON schema. Each OCR box is [x,y,width,height,text] on a 0-1000 page grid. "
-        "Layouts and label names vary: Buyer/Bill To/Customer are aliases; Qty/Quantity and Rate/Unit Price are aliases. "
-        "Arabic invoice serial labels include مسلسل الفاتورة and رقم مسلسل الفاتورة; issue-date labels include تاريخ إصدار الفاتورة. "
-        "Keep Date of Supply/تاريخ التوريد separate from the invoice issue date. "
-        "كود العميل means customer code, never customer name; find the actual company/person beside an اسم العميل or customer section. "
-        "Item codes are optional; preserve every visible item row, including adjacent rows with similar descriptions, decimal quantities, units, and full alphanumeric invoice IDs. "
-        "For each row, transcribe the printed pre-tax/taxable column into amount exactly as printed, even when it does not equal quantity times unit_price. "
-        "Never replace a printed source value with a calculated value. Distinguish amount from the printed line total including tax (gross_amount). Do not treat addresses or VAT IDs as amounts. "
-        "Understand English and Arabic label aliases and table geometry. Preserve leading zeros in codes and VAT numbers. "
-        "Never invent a value: return null when it is absent or uncertain. Distinguish supplier VAT from customer VAT by labels and position. "
-        "Use arithmetic only to disambiguate OCR candidates, not to fabricate missing values. OCR:\n"
-        + json.dumps(_compact_ocr(pages), ensure_ascii=False, separators=(",", ":"))
-    )
-    body = {
-        "model": OLLAMA_MODEL, "stream": False, "format": INVOICE_SCHEMA,
-        "options": {"temperature": 0, "num_ctx": int(os.environ.get("OLLAMA_NUM_CTX", "8192")),
-                    "num_predict": int(os.environ.get("OLLAMA_NUM_PREDICT", "2048"))},
-        "keep_alive": "30m",
-        "messages": [
-            {"role": "system", "content": "You are a careful bilingual invoice document-understanding parser. Return only schema-valid JSON."},
-            {"role": "user", "content": prompt},
-        ],
-    }
-    result = request_json(OLLAMA_URL, body, timeout=float(os.environ.get("OLLAMA_TIMEOUT_SECONDS", "60")))
-    if result.get("error"):
-        raise ValueError(f"Ollama failed: {result['error']}")
-    if result.get("done") is False or result.get("done_reason") == "length":
-        raise ValueError("Ollama response was truncated; incomplete invoice output rejected")
-    content = result.get("message", {}).get("content")
-    parsed = json.loads(content) if isinstance(content, str) else content
-    if not isinstance(parsed, dict):
-        raise ValueError("Local AI returned an invalid invoice object")
-    return parsed
 
 
 def _result_score(result):
@@ -252,82 +155,16 @@ def _parse_invoice_hybrid(pages: list[dict[str, Any]], source_filename: str, lan
         candidate = {"data": layout, "quality": quality}
         if _result_score(candidate) >= _result_score(fallback):
             fallback = candidate
-    if mode == "fast" or os.environ.get("USE_LOCAL_AI", "true").lower() in {"false", "0", "no"}:
-        fallback["quality"]["parser"] = "spatial_fast"
-        fallback["quality"]["local_ai_status"] = "disabled"
-        if fallback["quality"]["needs_review"]:
-            fallback["quality"]["review_message"] = (
-                "Invoice fields are incomplete or failed validation. AI parsing is disabled. "
-                "Enable USE_LOCAL_AI in Colab cell 3, rerun cells 3 and 4, and select Balanced. "
-                "Compare raw_ocr pages with the source PDF before using these values."
-            )
-        return fallback
-
-    financial_checks=fallback['data'].get('validation',{})
-    if any(p.get('receipt_region') for p in pages) and all(financial_checks.get(k) for k in ('items_calculation_valid','subtotal_valid','vat_valid','net_amount_valid')):
-        fallback['quality']['local_ai_status']='skipped_source_review'
-        return fallback
-    spelling_review=any(a['kind'] in {'supplier_name','description'} for p in pages for a in p.get('targeted_ocr',{}).get('accepted',[]))
-    critical_missing=[f for f in fallback['quality'].get('missing_fields',[]) if f not in {'supplier.name','customer.name'} and not f.endswith('.description')]
-    if spelling_review and not critical_missing and all(financial_checks.get(k) for k in ('items_calculation_valid','subtotal_valid','vat_valid','net_amount_valid')):
-        fallback['quality']['local_ai_status']='skipped_source_review'
-        return fallback
-    # If every required field is already present and only source arithmetic or
-    # rounding keeps the result in review, a text-only model has no missing OCR
-    # evidence to recover. Avoid a slow generation that will be rejected by the
-    # same validation checks, while keeping the review status visible.
-    if (fallback['quality'].get('needs_review') and
-            not fallback['quality'].get('missing_fields') and
-            not fallback['quality'].get('low_confidence_fields') and
-            fallback['data']['invoice'].get('date')):
-        fallback['quality']['parser']='spatial_source_review'
-        fallback['quality']['local_ai_status']='skipped_source_only_review'
-        return fallback
-    if not fallback["quality"]["needs_review"] and fallback["data"]["invoice"].get("date"):
-        fallback["quality"]["parser"] = "spatial_checks_passed"
-        fallback["quality"]["local_ai_status"] = "skipped_checks_passed"
-        return fallback
-    try:
-        data = _ask_ollama(pages)
-        data.update({
-            "document_type": "invoice", "document_language": language.split("+"),
-            "source_filename": source_filename,
-        })
-        validation, quality = _validate(data)
-        issues, evidence = audit_ai(data, pages)
-        validation, quality = _validate(data)
-        quality["evidence_issues"] = issues
-        quality["field_evidence"] = evidence
-        quality["local_ai_status"] = "accepted_evidence_checked"
-        if issues:
-            quality["needs_review"] = True
-            quality["overall_status"] = "needs_review"
-        data["validation"] = validation
-        ai_result = {"data": data, "quality": quality}
-        # Never replace a locally verified result with AI output that fails
-        # arithmetic or required-field validation. This guard is important for
-        # small CPU-friendly models, which can understand layout but still swap
-        # nearby numbers.
-        ai_missing=quality.get('missing_fields',[])
-        ai_financially_complete=(not any(field=='items' or field.startswith('items[') or
-                                  field.startswith('totals.') for field in ai_missing) and
-            all(validation.get(key) is True for key in (
-                'items_calculation_valid','subtotal_valid','vat_valid','net_amount_valid')))
-        critical_ai_issues=any(issue.get('field')=='items.row_order' or
-                               str(issue.get('field','')).endswith('.item_code') for issue in issues)
-        if (not ai_financially_complete or critical_ai_issues
-                or _result_score(ai_result) < _result_score(fallback)
-                or len(data.get("items", [])) < len(fallback["data"].get("items", []))):
-            fallback["quality"]["parser"] = "spatial_after_local_ai_review"
-            fallback["quality"]["local_ai_status"] = "rejected_less_complete_result"
-            fallback["quality"]["local_ai_evidence_issues"] = issues
-            return fallback
-        return ai_result
-    except (OSError, ValueError, RuntimeError, KeyError, json.JSONDecodeError, urllib.error.URLError) as error:
-        fallback["quality"]["parser"] = "spatial_fallback"
-        fallback["quality"]["local_ai_status"] = "failed"
-        fallback["quality"]["local_ai_error"] = str(error)[:2000]
-        return fallback
+    # The web app's Accuracy mode performs its own original-page vision pass.
+    # This module supplies the deterministic spatial draft for both modes.
+    fallback["quality"]["parser"] = "spatial_fast"
+    fallback["quality"]["local_ai_status"] = "disabled"
+    if fallback["quality"]["needs_review"]:
+        fallback["quality"]["review_message"] = (
+            "Invoice fields are incomplete or failed validation. Compare raw OCR "
+            "with the PDF; Accuracy mode can independently read the page image."
+        )
+    return fallback
 
 
 def parse_invoice_hybrid(pages, source_filename, language, mode='auto'):

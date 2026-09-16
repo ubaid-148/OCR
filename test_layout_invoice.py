@@ -2,7 +2,7 @@ import unittest
 
 from layout_invoice import table, numeric, parse_layout, table_retry_reasons
 from invoice_formatter import money
-from local_ai_parser import _validate, _compact_ocr
+from local_ai_parser import _validate
 
 
 def box(text, x, y, scale=1):
@@ -26,15 +26,6 @@ class LayoutInvoiceTests(unittest.TestCase):
         self.assertEqual(numeric("1,234.56"),1234.56)
         self.assertEqual(numeric("١٬٢٣٤٫٥٦"),1234.56)
         self.assertEqual(numeric("1,5 SET"),1.5)
-
-    def test_ai_input_keeps_every_box_and_page(self):
-        pages = [dict(page=n, width=600, height=800, render_dpi=200,
-                      words=[box("Item B", 400, 400), box("Item A", 100, 100)]) for n in (1,2)]
-        compact = _compact_ocr(pages)
-        self.assertEqual([p["page"] for p in compact], [1,2])
-        for page in compact:
-            self.assertEqual([b[-1] for b in page["boxes"]], ["Item A", "Item B"])
-            self.assertTrue(all(len(b)==5 for b in page["boxes"]))
 
     def test_column_aliases_reordering_scaling_and_optional_codes(self):
         variants = [

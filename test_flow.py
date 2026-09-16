@@ -1,4 +1,3 @@
-import copy
 import io
 import json
 import os
@@ -68,8 +67,7 @@ class FlowTests(unittest.TestCase):
             {'text':'Cust.Name','left':100,'top':180,'width':100,'height':20,'confidence':99},
             {'text':'Example Buyer Trading Co.','left':260,'top':180,'width':240,'height':20,'confidence':99},
         ]
-        with patch('local_ai_parser._ask_ollama',side_effect=OSError('offline')):
-            result=parse_invoice_hybrid(source,'example.pdf','eng+ara')
+        result=parse_invoice_hybrid(source,'example.pdf','eng+ara')
         self.assertNotEqual(result['data']['customer']['name'],'Cust.Name')
 
     def test_json_error_preserves_message(self):

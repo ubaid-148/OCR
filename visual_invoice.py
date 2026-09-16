@@ -1,4 +1,4 @@
-"""Image-first invoice extraction for Colab; never trains on unverified PDFs."""
+"""Image-first invoice extraction with spatial and source-evidence review."""
 from __future__ import annotations
 
 import base64
@@ -440,35 +440,18 @@ def parse_invoice_visual(pdf_path: str | Path, pages: list[dict[str, Any]],
         ai_seconds = 0.0
         header_seconds = 0.0
         item_seconds = 0.0
-        trained_url = os.environ.get("TRAINED_VISION_URL")
-        if trained_url:
-            originals = [images[0] for _, _, images in render_pages(pdf_path, pages)]
-            render_seconds = perf_counter() - render_started
+        for number, count, images in render_pages(pdf_path, pages):
+            render_seconds += perf_counter() - render_started
             if progress:
-                progress(f"Reading all {len(originals)} original pages with approved trained adapter")
+                progress(f"Reading original page {number} of {count} with vision AI")
             ai_started = perf_counter()
-            response = request_json(trained_url, {"images": originals},
-                                    timeout=float(os.environ.get("TRAINED_VISION_TIMEOUT_SECONDS", "600")),
-                                    service="Approved adapter")
-            if response.get("error"):
-                raise ValueError(f"Trained adapter error: {response['error']}")
-            parts.append(normalize_full(response.get("prediction"), filename, language,
-                                        page_count=len(originals)))
-            ai_seconds = perf_counter() - ai_started
-        else:
-            for number, count, images in render_pages(pdf_path, pages):
-                render_seconds += perf_counter() - render_started
-                if progress:
-                    progress(f"Reading original page {number} of {count} with vision AI")
-                ai_started = perf_counter()
-                raw = ask_visual(images, number, count, progress=progress)
-                scope_timings = raw.pop("_vision_timings", {})
-                header_seconds += scope_timings.get("visual_header", 0)
-                item_seconds += scope_timings.get("visual_items", 0)
-                parts.append(normalize_full(raw,
-                                            filename, language, number))
-                ai_seconds += perf_counter() - ai_started
-                render_started = perf_counter()
+            raw = ask_visual(images, number, count, progress=progress)
+            scope_timings = raw.pop("_vision_timings", {})
+            header_seconds += scope_timings.get("visual_header", 0)
+            item_seconds += scope_timings.get("visual_items", 0)
+            parts.append(normalize_full(raw, filename, language, number))
+            ai_seconds += perf_counter() - ai_started
+            render_started = perf_counter()
         stage_timings.update(visual_render=round(render_seconds, 3),
                              visual_ai=round(ai_seconds, 3),
                              visual_header=round(header_seconds, 3),
@@ -480,11 +463,11 @@ def parse_invoice_visual(pdf_path: str | Path, pages: list[dict[str, Any]],
         # Audit a copy: Paddle may miss a correct image reading. Keep such a
         # value visible, but never silently claim it is source-verified.
         issues, evidence = audit_ai(deepcopy(data), pages)
-        quality.update(parser="trained_visual_ai" if trained_url else "visual_ai",
-                       model=response.get("model_id") if trained_url else os.environ.get("OLLAMA_MODEL", "qwen3-vl:4b"),
-                       local_ai_status="trained_evidence_reviewed" if trained_url else "vision_evidence_reviewed", evidence_issues=issues,
+        quality.update(parser="visual_ai",
+                       model=os.environ.get("OLLAMA_MODEL", "qwen3-vl:4b"),
+                       local_ai_status="vision_evidence_reviewed", evidence_issues=issues,
                        field_evidence=evidence, review_reasons=conflicts + reconciliation_notes,
-                       visual_pages=len(originals) if trained_url else len(parts))
+                       visual_pages=len(parts))
         data["validation"] = validation
         quality.update(needs_review=True, overall_status="needs_review")
         quality["review_reasons"].append(
@@ -524,7 +507,7 @@ def parse_invoice_visual(pdf_path: str | Path, pages: list[dict[str, Any]],
             fallback["visual_candidate"] = visual
             return fallback
         if not financial:
-            quality.update(parser="trained_visual_spatial_review" if trained_url else "visual_spatial_review",
+            quality.update(parser="visual_spatial_review",
                            local_ai_status="incomplete_reconciled",
                            needs_review=True, overall_status="needs_review")
             quality.setdefault("review_reasons", []).append(
