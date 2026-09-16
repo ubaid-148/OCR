@@ -52,11 +52,24 @@ and runtime. Disable `RUN_9498_CHECK` to skip it. The v11 GPU result passed only
 rows as `visual_spatial_review` and never treats a partial score as accuracy.
 This single-document check does not establish accuracy across other layouts.
 
-## Private multi-layout training
+## Direct cloud result without training
+
+For an immediate full-schema result from one PDF, open
+[colab_result.ipynb](https://colab.research.google.com/github/ubaid-148/OCR/blob/main/colab_result.ipynb).
+It sends the complete PDF to [Claude's PDF API](https://platform.claude.com/docs/en/build-with-claude/pdf-support),
+uses [constrained JSON output](https://platform.claude.com/docs/en/build-with-claude/structured-outputs),
+and checks item/totals arithmetic. No GPU, Google Drive, local OCR, or verified
+training labels are required. The Claude API key goes only in Colab Secrets as
+`ANTHROPIC_API_KEY`; each run processes one PDF and can incur API charges.
+Claude chat subscriptions [do not include API usage](https://support.claude.com/en/articles/9876003-i-have-a-paid-claude-subscription-pro-max-team-or-enterprise-plans-why-do-i-have-to-pay-separately-to-use-the-claude-api-and-console). Source verification is still
+needed before accounting import, and this option has not been benchmarked on
+the 111 public formats.
+
+## Public multi-layout training
 
 The repository includes a separate two-notebook training workflow for unrelated invoice layouts. Use [colab_dataset.ipynb](https://colab.research.google.com/github/ubaid-148/OCR/blob/main/colab_dataset.ipynb) to create OCR drafts, then **manually verify every field against the page** before export. [colab_train.ipynb](https://colab.research.google.com/github/ubaid-148/OCR/blob/main/colab_train.ipynb) trains a Qwen3-VL 2B LoRA experiment from those verified labels. See [TRAINING.md](TRAINING.md). The current Colab inference model is the stock Qwen3-VL 4B, **not** that adapter; uploading PDFs alone did not train or deploy a model.
 
-The 111 PDFs in `public_invoice_pdfs/` were explicitly authorized by the user for public distribution. Corrected labels, rendered pages, predictions, and adapters remain ignored and must not be committed. OCR/cloud output is only a draft: export defaults to at least 80 explicitly verified documents. A trained adapter is rejected if it regresses on held-out critical fields, invalid JSON, exact-document accuracy, or unsupported-value behavior. Passing a private test set is not a 100% guarantee for unseen formats, so evidence validation and `needs_review` remain required.
+The 111 PDFs in `public_invoice_pdfs/` were explicitly authorized by the user for public distribution. Source-verified labels are intentionally pushed to public `public_invoice_labels/`; rendered pages and drafts remain temporary in Colab, while passing adapters are published only as GitHub Release assets. OCR/cloud output is only a draft: training export requires at least 80 explicitly verified documents. A trained adapter is rejected if it regresses on held-out critical fields, invalid JSON, exact-document accuracy, or unsupported-value behavior. Passing a test set is not a 100% guarantee for unseen formats, so evidence validation and `needs_review` remain required.
 
 ## Flow
 
