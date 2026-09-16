@@ -1,4 +1,4 @@
-"""Private in-notebook annotation UI for Google Colab/Jupyter."""
+"""In-notebook annotation UI for Google Colab/Jupyter."""
 from __future__ import annotations
 
 import json
@@ -9,8 +9,8 @@ from typing import Any
 from training.invoice_dataset import ANNOTATION_VERSION, load_manifest, new_annotation, normalize_data, validate_annotation
 
 
-def _read_candidate(work_dir: Path, record: dict[str, Any]) -> dict[str, Any]:
-    label = work_dir / "labels" / f"{record['doc_id']}.json"
+def _read_candidate(work_dir: Path, labels_root: Path, record: dict[str, Any]) -> dict[str, Any]:
+    label = labels_root / f"{record['doc_id']}.json"
     draft = work_dir / "drafts" / f"{record['doc_id']}.json"
     path = label if label.exists() else draft
     if path.exists():
@@ -50,6 +50,7 @@ def launch(work_dir: str | Path, verified_by: str = ""):
 
     root = Path(work_dir).resolve()
     manifest = load_manifest(root)
+    labels_root = Path(manifest["labels_root"])
     records = manifest["documents"]
     if not records:
         raise ValueError("Workspace contains no documents")
@@ -77,7 +78,7 @@ def launch(work_dir: str | Path, verified_by: str = ""):
     def update_progress() -> None:
         verified_count = included_count = 0
         for record in records:
-            label = root / "labels" / f"{record['doc_id']}.json"
+            label = labels_root / f"{record['doc_id']}.json"
             if not label.exists():
                 continue
             try:
@@ -97,7 +98,7 @@ def launch(work_dir: str | Path, verified_by: str = ""):
 
     def load(*_args) -> None:
         record = current_record()
-        annotation = _read_candidate(root, record)
+        annotation = _read_candidate(root, labels_root, record)
         editor.value = json.dumps(annotation, ensure_ascii=False, indent=2)
         page.max = max(1, len(record["pages"]))
         page.value = 1
@@ -124,7 +125,7 @@ def launch(work_dir: str | Path, verified_by: str = ""):
             errors, warnings = validate_annotation(annotation, require_verified=include is not None)
             if errors:
                 raise ValueError("; ".join(errors))
-            existing_label = root / "labels" / f"{record['doc_id']}.json"
+            existing_label = labels_root / f"{record['doc_id']}.json"
             # Editing a previously verified label invalidates its approval until
             # the reviewer explicitly verifies the corrected version again.
             destination = existing_label if include is not None or existing_label.exists() else root / "drafts" / f"{record['doc_id']}.json"
@@ -151,7 +152,7 @@ def launch(work_dir: str | Path, verified_by: str = ""):
     exclude.on_click(lambda _button: persist(False) and move(1))
     controls = widgets.HBox([previous, next_button, save, verify, exclude])
     dashboard = widgets.VBox([
-        widgets.HTML("<h3>Private invoice ground-truth review</h3>"),
+        widgets.HTML("<h3>Invoice ground-truth review (verified labels will be public on GitHub)</h3>"),
         progress, chooser, verifier, page, controls,
         widgets.HBox([image, editor], layout=widgets.Layout(align_items="flex-start")), status,
     ])

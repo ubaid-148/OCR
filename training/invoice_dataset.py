@@ -305,20 +305,25 @@ def _safe_id(path: Path, digest: str, used: set[str]) -> str:
 
 
 def prepare_workspace(
-    pdf_dir: Path, work_dir: Path, dpi: int = 200, allow_public_pdf_dir: bool = False
+    pdf_dir: Path, work_dir: Path, dpi: int = 200, allow_public_pdf_dir: bool = False,
+    labels_dir: Path | None = None, allow_public_labels: bool = False,
 ) -> dict[str, Any]:
     try:
         import pypdfium2 as pdfium
     except ImportError as error:
         raise RuntimeError("pypdfium2 is required: pip install pypdfium2") from error
     pdf_dir, work_dir = pdf_dir.resolve(), work_dir.resolve()
+    labels_dir = labels_dir.resolve() if labels_dir is not None else work_dir / "labels"
     if _inside_git_worktree(work_dir) or _inside_project_tree(work_dir):
         raise ValueError("WORK_DIR must stay outside a Git worktree to prevent labels and weights entering public commits")
     if (_inside_git_worktree(pdf_dir) or _inside_project_tree(pdf_dir)) and not allow_public_pdf_dir:
         raise ValueError("PDF_DIR is inside a Git worktree; pass --allow-public-pdf-dir only for intentionally public PDFs")
+    if (_inside_git_worktree(labels_dir) or _inside_project_tree(labels_dir)) and not allow_public_labels:
+        raise ValueError("LABELS_DIR is in a public Git worktree; pass --allow-public-labels only when public labels are authorized")
     work_dir.mkdir(parents=True, exist_ok=True)
-    for name in ("images", "drafts", "labels", "exports", "failures"):
+    for name in ("images", "drafts", "exports", "failures"):
         (work_dir / name).mkdir(exist_ok=True)
+    labels_dir.mkdir(parents=True, exist_ok=True)
     records: list[dict[str, Any]] = []
     used: set[str] = set()
     for path in _pdf_paths(pdf_dir):
@@ -356,6 +361,7 @@ def prepare_workspace(
         "manifest_version": "invoice-ocr-private-workspace-v1",
         "created_at": datetime.now(timezone.utc).isoformat(),
         "pdf_root": str(pdf_dir),
+        "labels_root": str(labels_dir),
         "dpi": dpi,
         "documents": records,
     }
@@ -370,6 +376,7 @@ def load_manifest(work_dir: Path) -> dict[str, Any]:
     result = json.loads(path.read_text(encoding="utf-8"))
     if result.get("manifest_version") != "invoice-ocr-private-workspace-v1":
         raise ValueError("Unsupported private workspace manifest")
+    result.setdefault("labels_root", str(work_dir.resolve() / "labels"))
     return result
 
 
@@ -405,10 +412,11 @@ def draft_workspace(work_dir: Path, languages: str = "ara+eng", overwrite: bool 
 
 def _load_eligible(work_dir: Path, require_all_verified: bool = False) -> tuple[list[dict[str, Any]], list[str]]:
     manifest = load_manifest(work_dir)
+    labels_root = Path(manifest["labels_root"])
     eligible: list[dict[str, Any]] = []
     problems: list[str] = []
     for record in manifest["documents"]:
-        label_path = work_dir.resolve() / "labels" / f"{record['doc_id']}.json"
+        label_path = labels_root / f"{record['doc_id']}.json"
         if not label_path.exists():
             if require_all_verified:
                 problems.append(f"{record['source_filename']}: verified label is missing")
@@ -433,11 +441,12 @@ def _load_eligible(work_dir: Path, require_all_verified: bool = False) -> tuple[
 
 def validation_report(work_dir: Path) -> dict[str, Any]:
     manifest = load_manifest(work_dir)
+    labels_root = Path(manifest["labels_root"])
     verified = included = 0
     errors: list[str] = []
     warnings: list[str] = []
     for record in manifest["documents"]:
-        label_path = work_dir.resolve() / "labels" / f"{record['doc_id']}.json"
+        label_path = labels_root / f"{record['doc_id']}.json"
         if not label_path.exists():
             continue
         try:
@@ -581,6 +590,8 @@ def _parser() -> argparse.ArgumentParser:
     prepare.add_argument("--work-dir", type=Path, required=True)
     prepare.add_argument("--dpi", type=int, default=200)
     prepare.add_argument("--allow-public-pdf-dir", action="store_true")
+    prepare.add_argument("--labels-dir", type=Path)
+    prepare.add_argument("--allow-public-labels", action="store_true")
     draft = sub.add_parser("draft", help="run the existing OCR to prefill editable labels")
     draft.add_argument("--work-dir", type=Path, required=True)
     draft.add_argument("--languages", default="ara+eng")
@@ -598,7 +609,8 @@ def main(argv: Iterable[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
         if args.command == "prepare":
-            manifest = prepare_workspace(args.pdf_dir, args.work_dir, args.dpi, args.allow_public_pdf_dir)
+            manifest = prepare_workspace(args.pdf_dir, args.work_dir, args.dpi, args.allow_public_pdf_dir,
+                                         args.labels_dir, args.allow_public_labels)
             print(json.dumps({"documents": len(manifest["documents"]), "work_dir": str(args.work_dir.resolve())}, indent=2))
         elif args.command == "draft":
             print(json.dumps(draft_workspace(args.work_dir, args.languages, args.overwrite), indent=2))

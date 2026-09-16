@@ -45,11 +45,14 @@ def adapter_digest(directory: Path) -> str:
 
 def load_approval(path: Path) -> dict:
     approval = json.loads(path.read_text(encoding="utf-8"))
+    def asset_path(value: str) -> Path:
+        candidate = Path(value)
+        return (candidate if candidate.is_absolute() else path.parent / candidate).resolve()
     if approval.get("approval_version") != "invoice-adapter-approval-v1" or approval.get("prompt_version") != PROMPT_VERSION:
         raise ValueError("Adapter approval is missing or belongs to an old training schema")
     if approval.get("approved") is not True:
         raise ValueError("Adapter has not passed the final test gate")
-    adapter = Path(approval.get("adapter_dir", "")).resolve()
+    adapter = asset_path(approval.get("adapter_dir", ""))
     if not (adapter / "adapter_config.json").is_file():
         raise ValueError("Approved adapter weights/configuration are missing")
     config = json.loads((adapter / "adapter_config.json").read_text(encoding="utf-8"))
@@ -57,8 +60,8 @@ def load_approval(path: Path) -> dict:
         raise ValueError("Adapter was trained on a different base model")
     if adapter_digest(adapter) != approval.get("adapter_sha256"):
         raise ValueError("Adapter weights changed after held-out approval")
-    base_path = Path(approval["base_test_metrics"])
-    candidate_path = Path(approval["adapter_test_metrics"])
+    base_path = asset_path(approval["base_test_metrics"])
+    candidate_path = asset_path(approval["adapter_test_metrics"])
     if (file_digest(base_path) != approval.get("base_test_sha256")
             or file_digest(candidate_path) != approval.get("adapter_test_sha256")):
         raise ValueError("Held-out metrics changed after adapter approval")

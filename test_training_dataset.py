@@ -1,10 +1,14 @@
+import io
 import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch as mock_patch
 
 from training.compare_metrics import compare
 from training.adapter_service import adapter_digest, file_digest, load_approval
+from training.github_release import bundle_adapter, download_bundle
+from training.github_sync import push_verified_labels
 from training.invoice_dataset import (
     ANNOTATION_VERSION,
     empty_data,
@@ -36,6 +40,27 @@ def complete_data(number="INV-1", supplier="300000000000001"):
 
 
 class TrainingDatasetTests(unittest.TestCase):
+    def test_github_push_refuses_unverified_edit_of_published_label(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            project = root / "OCR"
+            work = root / "work"
+            labels = project / "public_invoice_labels"
+            labels.mkdir(parents=True)
+            work.mkdir()
+            annotation = new_annotation("one.pdf", "sha", complete_data("one", "3000"))
+            (labels / "one.json").write_text(json.dumps(annotation), encoding="utf-8")
+            (work / "manifest.json").write_text(json.dumps({
+                "manifest_version": "invoice-ocr-private-workspace-v1",
+                "labels_root": str(labels),
+                "documents": [{"doc_id": "one", "source_filename": "one.pdf", "source_sha256": "sha"}],
+            }), encoding="utf-8")
+            git_outputs = [str(project.resolve()), "https://github.com/ubaid-148/OCR.git", "",
+                           "public_invoice_labels/one.json"]
+            with mock_patch("training.github_sync._git", side_effect=git_outputs):
+                with self.assertRaisesRegex(ValueError, "not re-verified"):
+                    push_verified_labels(project, work, "dummy-token")
+
     def test_normalizes_cloud_style_output_without_template_values(self):
         data = normalize_data({
             "seller": {"name_ar": "بائع", "tax_code": "300123"},
@@ -77,7 +102,7 @@ class TrainingDatasetTests(unittest.TestCase):
     def test_private_export_and_scoring(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            for name in ("images", "drafts", "labels", "exports"):
+            for name in ("images", "drafts", "public_labels", "exports"):
                 (root / name).mkdir()
             records = []
             for index in range(9):
@@ -91,8 +116,9 @@ class TrainingDatasetTests(unittest.TestCase):
                 records.append(record)
                 annotation = new_annotation(record["source_filename"], record["source_sha256"], complete_data(str(index), f"300{index // 3}"))
                 annotation.update(verified=True, include_in_training=True, verified_by="reviewer", verified_at="now")
-                (root / "labels" / f"{doc_id}.json").write_text(json.dumps(annotation, ensure_ascii=False), encoding="utf-8")
-            (root / "manifest.json").write_text(json.dumps({"manifest_version": "invoice-ocr-private-workspace-v1", "documents": records}), encoding="utf-8")
+                (root / "public_labels" / f"{doc_id}.json").write_text(json.dumps(annotation, ensure_ascii=False), encoding="utf-8")
+            (root / "manifest.json").write_text(json.dumps({"manifest_version": "invoice-ocr-private-workspace-v1",
+                                                            "labels_root": str(root / "public_labels"), "documents": records}), encoding="utf-8")
             report = validation_report(root)
             self.assertEqual(report["included"], 9)
             summary = export_qwen(root, min_verified=3)
@@ -188,6 +214,13 @@ class TrainingDatasetTests(unittest.TestCase):
             approval_path = root / "approval.json"
             approval_path.write_text(json.dumps(approval), encoding="utf-8")
             self.assertEqual(load_approval(approval_path)["adapter_dir"], str(adapter))
+            archive, tag = bundle_adapter(approval_path, root / "bundle.zip")
+            release = {"assets": [{"name": "invoice-adapter-v2.zip", "browser_download_url": "https://example.test/bundle.zip",
+                                   "digest": f"sha256:{file_digest(archive)}"}]}
+            with mock_patch("training.github_release._request", return_value=release), \
+                 mock_patch("training.github_release.urllib.request.urlopen", return_value=io.BytesIO(archive.read_bytes())):
+                portable = download_bundle(tag, root / "downloaded")
+            self.assertEqual(load_approval(portable)["model_id"], "Qwen/Qwen3-VL-2B-Instruct")
             weights.write_bytes(b"different weights")
             with self.assertRaisesRegex(ValueError, "changed"):
                 load_approval(approval_path)
