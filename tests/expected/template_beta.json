@@ -1,0 +1,17 @@
+{
+  "document_type": "Tax Invoice",
+  "invoice_number": "B-200",
+  "invoice_serial": null,
+  "invoice_date": "2026-02-20",
+  "date_of_supply": null,
+  "reference_no": null,
+  "payment_method": null,
+  "seller": {"name_ar": "تجارة بيتا", "name_en": null, "tax_number": "222222222222222", "commercial_registration": null, "building_no": null, "street": null, "district": null, "postal_code": null, "additional_no": null, "short_address": null, "city": null, "country": null},
+  "customer": {"name_ar": null, "customer_code": null, "tax_number": null, "commercial_registration": null, "building_no": null, "street": null, "district": null, "postal_code": null, "additional_no": null, "short_address": null, "city": null, "country": null, "customer_balance": null},
+  "items": [{"item_id": "Y2", "item_name": "Service", "unit": null, "quantity": 1.0, "unit_price": 20.0, "discount": null, "taxable_amount": 20.0, "tax_rate_percent": 15, "tax_code": null, "tax_amount": 3.0, "item_subtotal_including_vat": 23.0}],
+  "totals": {"total_excluding_vat": 20.0, "discount": null, "other_charges": null, "total_taxable_amount_excluding_vat": null, "total_vat": 3.0, "total_vat_rate_percent": null, "total_amount_including_vat": 23.0, "amount_in_words_ar": null},
+  "vat_summary": {"tax_code": null, "before_tax": null, "tax_amount": null, "including_tax": null},
+  "currency": null,
+  "page_info": {"page": 1, "total_pages": 1},
+  "validation": {"passed": false, "warnings": []}
+}

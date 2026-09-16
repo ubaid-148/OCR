@@ -1,0 +1,12 @@
+{
+  "document_type": "invoice",
+  "invoice_number": "A-100",
+  "invoice_date": "2026-01-10",
+  "payment_method": "Card",
+  "seller": {"name_en": "Alpha Trading", "tax_number": "111111111111111"},
+  "customer": {"name_ar": "عميل ألفا"},
+  "items": [{"item_code": "X1", "description": "Part", "unit": "PCS", "quantity": 2.0, "unit_price": 5.0, "discount": 0.0, "amount": 10.0, "vat_rate": 15, "vat_amount": 1.5, "gross_amount": 11.5}],
+  "totals": {"subtotal": 10.0, "vat_amount": 1.5, "net_amount": 11.5},
+  "currency": "SAR",
+  "validation": {"passed": true, "warnings": []}
+}

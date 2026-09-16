@@ -1,0 +1,7 @@
+{
+  "invoice_no": "B-200",
+  "date": "2026-02-20",
+  "supplier": {"name_ar": "تجارة بيتا", "vat_number": "222222222222222"},
+  "line_items": [{"item_id": "Y2", "item_name": "Service", "quantity": 1.0, "unit_price": 20.0, "taxable_amount": 20.0, "tax_rate": 15, "tax_amount": 3.0, "total_incl_vat": 23.0}],
+  "totals": {"total_excluding_vat": 20.0, "total_vat": 3.0, "total_amount_including_vat": 23.0}
+}

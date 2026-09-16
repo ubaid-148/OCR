@@ -6,6 +6,8 @@ from decimal import Decimal, InvalidOperation
 import re
 
 from bbox_grouping import box_geometry, group_rows
+import json
+from pathlib import Path
 
 
 COLUMNS = {
@@ -15,6 +17,21 @@ COLUMNS = {
     "tax_rate_percent": ("نسبة الضريبة", "tax rate"), "tax_code": ("رمز الضريبة", "tax code"),
     "tax_amount": ("مبلغ الضريبة", "tax amount"), "item_subtotal_including_vat": ("المجموع شامل", "including vat", "subtotal incl"),
 }
+
+
+def _template_match(header: list[dict[str, Any]]) -> str | None:
+    labels = " ".join(str(box.get("text", "")).casefold() for box in header)
+    registry = Path(__file__).with_name("templates")
+    for path in registry.glob("*.json"):
+        try:
+            config = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        expected = config.get("header_labels", [])
+        score = sum(label.casefold() in labels or label.casefold().replace(" ", "") in labels.replace(" ", "") for label in expected)
+        if expected and score / len(expected) >= 0.45:
+            return str(config.get("template") or path.stem)
+    return None
 
 
 def normalize_text(text: str) -> str:
@@ -56,6 +73,7 @@ def extract_table(boxes: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], di
             header, header_score = row, found
     if not header or header_score < 3:
         return [], {"needs_review": True, "warning": "Table header row was not detected"}
+    template_name = _template_match(header)
     anchors = {}
     for field, aliases in COLUMNS.items():
         anchors[field] = next((box for box in header if _matches(str(box.get("text", "")), aliases)), None)
@@ -88,4 +106,8 @@ def extract_table(boxes: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], di
         item["evidence"] = evidence
         item["needs_review"] = any(float(box.get("confidence") or 0) < 85 for box in cells.values())
         items.append(item)
-    return items, {"header": anchors, "boundaries": boundaries, "needs_review": False}
+    metadata = {"header": anchors, "boundaries": boundaries, "template": template_name, "needs_review": False}
+    if template_name is None:
+        metadata["warning"] = "unknown_template: extracted using generic fallback, please verify item table manually"
+        metadata["needs_review"] = True
+    return items, metadata

@@ -1,0 +1,6 @@
+{
+  "template": "alrajhi-zatca-bilingual",
+  "seller_aliases": ["الراجحي", "Alrajhi", "عبدالرحمن احمد الراجحي"],
+  "header_labels": ["الكود", "اسم الصنف", "الوحدة", "الكمية", "سعر الوحدة", "المبلغ الخاضع", "مبلغ الضريبة"],
+  "quirks": {"gross_amount": "quantity_extended", "amount": "may_be_per_unit"}
+}

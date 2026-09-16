@@ -1,0 +1,1 @@
+"""Known invoice template configurations."""

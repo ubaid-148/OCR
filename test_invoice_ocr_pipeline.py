@@ -29,7 +29,8 @@ class InvoiceOcrPipelineTests(unittest.TestCase):
         row = [box("A-1", 100, 160), box("2", 300, 160), box("14,79", 500, 160), box("29.58", 700, 160),
                box("15%", 900, 160), box("4.44", 1100, 160), box("34.02", 1300, 160)]
         items, meta = extract_table(headers + row)
-        self.assertFalse(meta["needs_review"])
+        self.assertTrue(meta["needs_review"])
+        self.assertIn("unknown_template", meta["warning"])
         self.assertEqual(items[0]["quantity"], 2.0)
         self.assertEqual(items[0]["unit_price"], 14.79)
         self.assertEqual(items[0]["tax_rate_percent"], 15.0)

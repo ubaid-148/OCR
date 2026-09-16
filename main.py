@@ -10,6 +10,7 @@ from label_value_pairing import pair_labels
 from pdf_fallback import cross_check
 from table_extractor import extract_table
 from validator import validate
+from canonical_schema import to_canonical
 
 
 def _boxes(payload: Any) -> list[dict[str, Any]]:
@@ -44,7 +45,10 @@ def build_document(payload: Any, pdf_path: str | None = None) -> dict[str, Any]:
         document["_pdf_cross_checks"] = cross_check(pdf_path, pairings)
         if document["_pdf_cross_checks"]:
             document["validation"]["needs_review"] = True
-    return document
+            document["validation"].setdefault("warnings", []).append(
+                "needs_review: low-confidence fields were cross-checked against the source PDF"
+            )
+    return to_canonical(document)
 
 
 def main() -> int:
