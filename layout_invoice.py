@@ -176,10 +176,19 @@ def _header_rank(key, word, quantity_word, y):
 def table(words):
     h,y=geometry(words)
     words=sorted(words,key=lambda w:(y(w),w.get('left',0),w['text']))
+    def column_x(word):
+        return float(word.get('grid_center_x',center(word)[0]))
+    def column_left(word):
+        return float(word.get('grid_column',[word.get('left',0),0])[0])
+    def column_right(word):
+        grid=word.get('grid_column')
+        return float(grid[1] if grid else word.get('left',0)+word.get('width',0))
     for q in words:
         if not header_match(q['text'],ALIASES['quantity']):
             continue
-        band=[w for w in words if abs(y(w)-y(q))<=3*h]
+        # Bilingual cells often stack Arabic, English and a short label over
+        # four text lines. Three median glyph heights can split one header row.
+        band=[w for w in words if abs(y(w)-y(q))<=5*h]
         headers={}
         for key,aliases in ALIASES.items():
             choices=[w for w in band if header_match(w['text'],aliases)]
@@ -201,7 +210,7 @@ def table(words):
             headers[key]=min(choices,key=lambda w:_header_rank(key,w,q,y),default=None)
         if not all(headers[k] for k in ('description','quantity','unit_price','amount')):
             continue
-        hx={k:center(w)[0] for k,w in headers.items() if w}
+        hx={k:column_x(w) for k,w in headers.items() if w}
         if len({hx[k] for k in ('description','quantity','unit_price','amount')})<4:
             continue
         for key in ('vat_amount','unit','serial','item_code','discount','vat_rate','gross_amount'):
@@ -214,41 +223,41 @@ def table(words):
         body=[w for w in words if header_y+h*.6<y(w)<stop]
         def tolerance(key):
             return max(h*.75,min(abs(hx[key]-x) for k,x in hx.items() if k!=key)*.58)
-        anchors=[w for w in body if numeric(w['text']) is not None and abs(center(w)[0]-hx['quantity'])<=tolerance('quantity')]
-        anchors.sort(key=lambda w:(y(w),abs(center(w)[0]-hx['quantity'])))
+        anchors=[w for w in body if numeric(w['text']) is not None and abs(column_x(w)-hx['quantity'])<=tolerance('quantity')]
+        anchors.sort(key=lambda w:(y(w),abs(column_x(w)-hx['quantity'])))
         unique=[]
         for w in anchors:
             if not unique or abs(y(w)-y(unique[-1]))>h*.7:
                 unique.append(w)
         # Keep every printed description row, including gaps between readable quantities.
         for w in body:
-            if numeric(w['text']) is None and w.get('height',h)<h*2 and abs(center(w)[0]-hx['description'])<tolerance('description') and not contains(w['text'],('total','vat','discount')):
+            if numeric(w['text']) is None and w.get('height',h)<h*2 and abs(column_x(w)-hx['description'])<tolerance('description') and not contains(w['text'],('total','vat','discount')):
                 row_peers=[p for p in body if abs(y(p)-y(w))<h*1.15]
-                numeric_peers=[p for p in row_peers if numeric(p['text']) is not None and any(abs(center(p)[0]-hx[k])<tolerance(k) for k in ('unit_price','amount'))]
-                coded='item_code' in hx and any(abs(center(p)[0]-hx['item_code'])<tolerance('item_code') and
+                numeric_peers=[p for p in row_peers if numeric(p['text']) is not None and any(abs(column_x(p)-hx[k])<tolerance(k) for k in ('unit_price','amount'))]
+                coded='item_code' in hx and any(abs(column_x(p)-hx['item_code'])<tolerance('item_code') and
                     re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9./#*+() -]{1,60}',normalize(p['text'])) for p in row_peers)
                 if (len(numeric_peers)>=2 or coded) and all(abs(y(w)-y(a))>h*1.15 for a in unique):unique.append(w)
         unique.sort(key=y)
         items=[]
         exclusive=any(contains(w['text'],('taxable','without vat','القيمة الخاضعة')) and
-                      abs(center(w)[0]-hx['amount'])<h*3 for w in band)
+                      abs(column_x(w)-hx['amount'])<h*3 for w in band)
         gross_column=not exclusive and 'vat_amount' in hx and contains(headers['amount']['text'],('total amount','الاجمالي','الإجمالي'))
         for i,anchor in enumerate(unique):
-            quantity_missing=numeric(anchor['text']) is None or abs(center(anchor)[0]-hx['quantity'])>tolerance('quantity')
+            quantity_missing=numeric(anchor['text']) is None or abs(column_x(anchor)-hx['quantity'])>tolerance('quantity')
             row=[w for w in body if abs(y(w)-y(anchor))<h*1.15]
             def cell(key):
                 if key not in hx:
                     return None
-                return min((w for w in row if numeric(w['text']) is not None and abs(center(w)[0]-hx[key])<=tolerance(key)),
-                           key=lambda w:(w.get('source')!='targeted_ocr',abs(center(w)[0]-hx[key]),abs(y(w)-y(anchor)),w['text']),default=None)
+                return min((w for w in row if numeric(w['text']) is not None and abs(column_x(w)-hx[key])<=tolerance(key)),
+                           key=lambda w:(w.get('source')!='targeted_ocr',abs(column_x(w)-hx[key]),abs(y(w)-y(anchor)),w['text']),default=None)
             price,amount,tax,discount=cell('unit_price'),cell('amount'),cell('vat_amount'),cell('discount')
             if price is anchor: price=None
             if amount is anchor or amount is price: amount=None
             code=None
             code_candidates=[w for w in row if re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9./#*+() -]{1,60}',normalize(w['text'])) and ('item_code' in hx or re.search(r'\d',w['text']))]
             if 'item_code' in hx:
-                code=min((w for w in code_candidates if abs(center(w)[0]-hx['item_code'])<=tolerance('item_code')),
-                         key=lambda w:abs(center(w)[0]-hx['item_code']),default=None)
+                code=min((w for w in code_candidates if abs(column_x(w)-hx['item_code'])<=tolerance('item_code')),
+                         key=lambda w:abs(column_x(w)-hx['item_code']),default=None)
             else:
                 # Without an explicit code header, a reordered Qty/Price/Amount
                 # column to the left of Description is not an item-code column.
@@ -256,20 +265,20 @@ def table(words):
                 # token rather than a plain monetary/quantity value.
                 known_numeric=('quantity','unit_price','amount','vat_amount','discount','gross_amount','vat_rate')
                 code=min((w for w in code_candidates if w['left']<headers['description']['left'] and
-                           center(w)[0]>hx.get('serial',-float('inf'))+h*.5 and
-                           all(abs(center(w)[0]-hx[key])>tolerance(key) for key in known_numeric if key in hx) and
+                           column_x(w)>hx.get('serial',-float('inf'))+h*.5 and
+                           all(abs(column_x(w)-hx[key])>tolerance(key) for key in known_numeric if key in hx) and
                            (bool(re.search(r'[A-Za-z]',normalize(w['text']))) or
                             bool(re.fullmatch(r'\d{3,}',normalize(w['text']))))),
                          key=lambda w:w['left'],default=None)
             # A description spans the free area between neighbor header edges.
             dx=hx['description']
-            left=max((headers[k]['left']+headers[k]['width'] for k,x in hx.items() if x<dx),default=-float('inf'))
-            right=min((headers[k]['left'] for k,x in hx.items() if x>dx),default=float('inf'))
-            if code is not None and center(code)[0]<dx:
+            left=max((column_right(headers[k]) for k,x in hx.items() if x<dx),default=-float('inf'))
+            right=min((column_left(headers[k]) for k,x in hx.items() if x>dx),default=float('inf'))
+            if code is not None and column_x(code)<dx:
                 left=max(left,code['left']+code['width'])
             def is_desc(w):
                 return (w is not code and numeric(w['text']) is None and len(w['text'].strip())>1 and
-                        left<center(w)[0]<right and not contains(w['text'],('subtotal','total','vat','tax')))
+                        left<column_x(w)<right and not contains(w['text'],('subtotal','total','vat','tax')))
             desc=[w for w in row if is_desc(w)]
             next_y=y(unique[i+1]) if i+1<len(unique) else stop
             desc += [w for w in body if w not in row and h*1.15<=y(w)-y(anchor)<=h*2.5 and y(w)<next_y-h*.8 and is_desc(w)]
@@ -286,7 +295,7 @@ def table(words):
             tv=numeric(tax['text']) if tax else None
             dv=numeric(discount['text']) if discount else None
             gross_word=cell('gross_amount')
-            unit_word=min((w for w in row if 'unit' in hx and abs(center(w)[0]-hx['unit'])<tolerance('unit') and re.fullmatch(r'(?i)pcs?\.?|sets?|kg|m|ltr|box|roll',w['text'].strip())),key=lambda w:abs(center(w)[0]-hx['unit']),default=None)
+            unit_word=min((w for w in row if 'unit' in hx and abs(column_x(w)-hx['unit'])<tolerance('unit') and re.fullmatch(r'(?i)pcs?\.?|sets?|kg|m|ltr|box|roll',w['text'].strip())),key=lambda w:abs(column_x(w)-hx['unit']),default=None)
             derived=False;total_is_pretax=False
             gross=av if gross_column else numeric(gross_word['text']) if gross_word else None
             if gross_column:

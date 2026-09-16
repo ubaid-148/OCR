@@ -60,6 +60,24 @@ def audit_ai(data, pages):
         pattern = r"(?<![\w/-])"+re.escape(value)+r"(?![\w/-])"
         matches = [(p,w) for p,w in words if value and re.search(pattern, normalized(w.get("text", "")))]
         check(container, key, f"{section}.{key}", matches)
+    code_positions=[]
+    for index,item in enumerate(data.get('items',[])):
+        code=normalized(item.get('item_code') or '')
+        if not code:
+            continue
+        pattern=r'(?<![\w/-])'+re.escape(code)+r'(?![\w/-])'
+        matches=[(p,w) for p,w in words if re.search(pattern,normalized(w.get('text','')))]
+        check(item,'item_code',f'items[{index}].item_code',matches)
+        # Enforce top-to-bottom item order only when the code has one
+        # unambiguous positioned occurrence. Repeated SKU codes are allowed.
+        if len(matches)==1 and 'top' in matches[0][1]:
+            code_positions.append((index,matches[0][0],center(matches[0][1])[1],
+                                   float(matches[0][1].get('height',0))))
+    for previous,current in zip(code_positions,code_positions[1:]):
+        if current[0]!=previous[0]+1:
+            continue
+        if current[1]==previous[1] and previous[2]>current[2]+max(previous[3],current[3])*.5:
+            issues.append({'field':'items.row_order','reason':'Item codes are assigned to different printed rows'})
     # A customer address must be supported inside the buyer/customer section.
     # Merely finding its building number elsewhere on the page can silently map
     # the seller address to the customer, which is worse than returning null.
@@ -74,14 +92,16 @@ def audit_ai(data, pages):
             limits[(page_no,id(anchor))]=min((center(w)[1] for p,w in words if p==page_no and
                 center(w)[1]>center(anchor)[1] and contains(w.get('text',''),(
                     'item description','description','product description','اسم الصنف','وصف الصنف'))),default=float('inf'))
-        supported=[]
+        supported=[];unsupported=[]
         for token in address_numbers:
-            supported.extend((p,w) for p,w in words if re.search(r'(?<!\d)'+re.escape(token)+r'(?!\d)',normalized(w.get('text',''))) and
-                             any(ap==p and center(anchor)[1]<=center(w)[1]<limits[(ap,id(anchor))]
-                                 for ap,anchor in anchors))
-        if not supported:
+            token_matches=[(p,w) for p,w in words if re.search(r'(?<!\d)'+re.escape(token)+r'(?!\d)',normalized(w.get('text',''))) and
+                           any(ap==p and center(anchor)[1]<=center(w)[1]<limits[(ap,id(anchor))]
+                               for ap,anchor in anchors)]
+            if token_matches:supported.extend(token_matches)
+            else:unsupported.append(token)
+        if unsupported:
             data['customer']['address']=None
-            issues.append({'field':'customer.address','reason':'Address evidence is outside the customer section'})
+            issues.append({'field':'customer.address','reason':'Some address numbers lack evidence in the customer section'})
         else:
             page,word=max(supported,key=lambda pair:float(pair[1].get('confidence') or 0))
             evidence['customer.address']=dict(page=page,text=word.get('text',''),confidence=word.get('confidence'),

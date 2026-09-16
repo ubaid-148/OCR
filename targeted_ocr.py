@@ -2,6 +2,7 @@
 import re
 from contextlib import closing
 from pathlib import Path
+from statistics import median
 from invoice_formatter import contains, center, has_arabic, normalize
 from document_regions import invoice_words
 from layout_invoice import (
@@ -179,6 +180,22 @@ def plan_regions(page):
     return candidates
 
 
+def _table_edges(edges,x0,x1):
+    """Recover a faint first table rule without dropping the last column."""
+    margin=max(4,(x1-x0)*.01)
+    edges=sorted(edge for edge in edges if x0+margin<edge<x1-3)
+    if len(edges)<3:return edges
+    gaps=[b-a for a,b in zip(edges,edges[1:]) if b-a>15]
+    if not gaps:return edges
+    typical=median(gaps)
+    normal=[gap for gap in gaps if gap<=typical*1.8]
+    first_width=max(normal or [typical])
+    inferred=max(x0+2,edges[0]-first_width)
+    if edges[0]-inferred>15:
+        edges.insert(0,inferred)
+    return edges
+
+
 def grid_cells(pdf_page,region,dpi,page_width,page_height):
     """Use visible vertical rules to re-read merged headers cell by cell."""
     import cv2
@@ -196,8 +213,8 @@ def grid_cells(pdf_page,region,dpi,page_width,page_height):
     for x in indices:
         if not groups or x-groups[-1][-1]>4:groups.append([x])
         else:groups[-1].append(x)
-    edges=[sum(g)/len(g)/factor for g in groups]
-    return [dict(kind='table_cells',bbox=[a+2,y0,b-2,y1],original={},language=region.get('language','ar')) for a,b in zip(edges,edges[1:]) if b-a>15][:12]
+    edges=_table_edges([sum(g)/len(g)/factor for g in groups],x0,x1)
+    return [dict(kind='table_cells',bbox=[a+2,y0,b-2,y1],original={},language=region.get('language','ar')) for a,b in zip(edges,edges[1:]) if b-a>15][:16]
 
 
 def retry_regions(pdf_page,page_payload,model,extract_words,temp_root):
@@ -286,6 +303,11 @@ def retry_regions(pdf_page,page_payload,model,extract_words,temp_root):
                             width=word['width']/scale,height=word['height']/scale,
                             polygon=[[x/scale+x0,y/scale+y0] for x,y in word['polygon']],
                             source='targeted_ocr',retry_kind=region['kind'])
+                if region['kind'] in {'table_cells','table_cells_en'}:
+                    # Text inside numeric cells may be right/left aligned. Keep
+                    # the ruled cell centre so parsing uses the actual column,
+                    # not the glyph box centre returned by recognition.
+                    word.update(grid_column=[x0,x1],grid_center_x=(x0+x1)/2)
                 found.append(word)
         if region['kind']=='supplier_name_ar' and not any(contains(w['text'],('مؤسسة','مؤسسه','شركة')) and len(w['text'])>12 for w in found):
             # The Arabic name may be fragmented by detection; read the complete label line.

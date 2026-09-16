@@ -24,6 +24,8 @@ def clean_invoice_response(payload):
         reasons.append(f'Missing field: {field}')
     for field in quality.get('low_confidence_fields') or []:
         reasons.append(f"Check field: {field.get('field', 'unreadable text')}")
+    for issue in quality.get('evidence_issues') or []:
+        reasons.append(f"Check field: {issue.get('field', 'unverified value')} — {issue.get('reason', 'source evidence is insufficient')}")
     needs_review = quality.get('needs_review', True)
     if needs_review and not reasons:
         reasons.append('Check the extracted fields and totals against the PDF.')

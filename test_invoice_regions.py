@@ -3,7 +3,7 @@ import unittest
 from document_regions import invoice_words
 from layout_invoice import table, numeric, header_match, parse_layout
 from local_ai_parser import _validate
-from targeted_ocr import merge_retries, plan_regions
+from targeted_ocr import _table_edges, merge_retries, plan_regions
 from test_layout_invoice import box
 from test_invoice_evidence import sample
 
@@ -32,6 +32,12 @@ class InvoiceRegionTests(unittest.TestCase):
         table_plan=next(plan for plan in plans if plan['kind']=='table_cells')
         self.assertTrue(table_plan['recover_headers'])
         self.assertTrue(any('amount' in reason for reason in table_plan['retry_reasons']))
+
+    def test_outer_table_rules_are_recovered_without_dropping_last_column(self):
+        edges=_table_edges([168,302,412,535,656,780,890,987,1073,1478,1648],0,1654)
+        self.assertEqual(len(edges),12)
+        self.assertLess(edges[0],168)
+        self.assertEqual(edges[-1],1648)
 
     def test_joined_arabic_unit_and_price_headers(self):
         self.assertTrue(header_match('سعر افراديالوحدة',('سعر افرادي',)))

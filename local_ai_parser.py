@@ -298,6 +298,7 @@ def _parse_invoice_hybrid(pages: list[dict[str, Any]], source_filename: str, lan
         validation, quality = _validate(data)
         quality["evidence_issues"] = issues
         quality["field_evidence"] = evidence
+        quality["local_ai_status"] = "accepted_evidence_checked"
         if issues:
             quality["needs_review"] = True
             quality["overall_status"] = "needs_review"
@@ -307,7 +308,15 @@ def _parse_invoice_hybrid(pages: list[dict[str, Any]], source_filename: str, lan
         # arithmetic or required-field validation. This guard is important for
         # small CPU-friendly models, which can understand layout but still swap
         # nearby numbers.
-        if (_result_score(ai_result) < _result_score(fallback)
+        ai_missing=quality.get('missing_fields',[])
+        ai_financially_complete=(not any(field=='items' or field.startswith('items[') or
+                                  field.startswith('totals.') for field in ai_missing) and
+            all(validation.get(key) is True for key in (
+                'items_calculation_valid','subtotal_valid','vat_valid','net_amount_valid')))
+        critical_ai_issues=any(issue.get('field')=='items.row_order' or
+                               str(issue.get('field','')).endswith('.item_code') for issue in issues)
+        if (not ai_financially_complete or critical_ai_issues
+                or _result_score(ai_result) < _result_score(fallback)
                 or len(data.get("items", [])) < len(fallback["data"].get("items", []))):
             fallback["quality"]["parser"] = "spatial_after_local_ai_review"
             fallback["quality"]["local_ai_status"] = "rejected_less_complete_result"

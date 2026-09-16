@@ -74,6 +74,19 @@ class EvidenceTests(unittest.TestCase):
         self.assertIsNone(data['customer']['address'])
         self.assertTrue(any(issue['field']=='customer.address' for issue in issues))
 
+    def test_partially_supported_customer_address_is_rejected(self):
+        data=sample();data['customer']['address']='Building 3518, Post Code 623'
+        source=pages()
+        source[0]['words'] += [
+            dict(text='Customer',top=200,left=100,width=100,height=20,confidence=99),
+            dict(text='Building 3518',top=250,left=100,width=100,height=20,confidence=99),
+            dict(text='Post Code 34623',top=280,left=100,width=100,height=20,confidence=99),
+            dict(text='Description',top=400,left=100,width=100,height=20,confidence=99),
+        ]
+        issues,_=audit_ai(data,source)
+        self.assertIsNone(data['customer']['address'])
+        self.assertTrue(any(issue['field']=='customer.address' for issue in issues))
+
     def test_ai_cannot_silently_drop_a_row(self):
         fallback_data=sample()
         fallback_data["items"].append(dict(line_no=2, quantity=1, unit_price=None, amount=None))
@@ -86,6 +99,30 @@ class EvidenceTests(unittest.TestCase):
             result=parse_invoice_hybrid(pages(),"test.pdf","eng")
         self.assertEqual(len(result["data"]["items"]),2)
         self.assertEqual(result["quality"]["local_ai_status"],"rejected_less_complete_result")
+
+    def test_ai_with_unmapped_item_columns_is_never_accepted(self):
+        fallback_data=sample();fallback_data['items'][0]['amount']=None
+        checks,quality=_validate(fallback_data);fallback_data['validation']=checks
+        fallback=dict(data=fallback_data,quality=quality)
+        ai_data=sample();ai_data['items'][0].update(quantity=15,amount=None,vat_amount=None,gross_amount=None)
+        with patch.dict(os.environ,{"USE_LOCAL_AI":"true"}), \
+             patch("local_ai_parser.parse_invoice",return_value=copy.deepcopy(fallback)), \
+             patch("local_ai_parser.parse_layout",return_value=None), \
+             patch("local_ai_parser._ask_ollama",return_value=ai_data):
+            result=parse_invoice_hybrid(pages(),"test.pdf","eng")
+        self.assertNotEqual(result['quality']['parser'],'local_ai')
+        self.assertEqual(result['quality']['local_ai_status'],'rejected_less_complete_result')
+
+    def test_ai_swapped_item_codes_fail_printed_row_order(self):
+        data=sample()
+        data['items']=[dict(data['items'][0],item_code='A-1'),
+                       dict(data['items'][0],line_no=2,item_code='C-3'),
+                       dict(data['items'][0],line_no=3,item_code='B-2')]
+        source=pages()
+        source[0]['words'] += [dict(text=code,top=y,left=700,width=80,height=20,confidence=99)
+                               for code,y in [('A-1',300),('B-2',340),('C-3',380)]]
+        issues,_=audit_ai(data,source)
+        self.assertTrue(any(issue['field']=='items.row_order' for issue in issues))
 
     def test_truncated_response_is_not_accepted(self):
         response=io.BytesIO(json.dumps(dict(done=True,done_reason="length",message=dict(content=json.dumps(sample())))).encode())

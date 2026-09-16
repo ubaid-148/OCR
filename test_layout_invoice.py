@@ -142,6 +142,27 @@ class LayoutInvoiceTests(unittest.TestCase):
         row=table(words)[0][0]
         self.assertEqual(row['description'],'زيت شل هيلكس HELIX 15/40')
 
+    def test_ruled_cell_centres_beat_right_aligned_glyph_boxes(self):
+        def ruled(text,left,right,y,glyph_x):
+            word=box(text,glyph_x,y)
+            word.update(source='targeted_ocr',retry_kind='table_cells_en',
+                        grid_column=[left,right],grid_center_x=(left+right)/2)
+            return word
+        columns={'gross':(20,150),'vat':(150,280),'amount':(390,520),'price':(650,780),
+                 'qty':(780,900),'unit':(900,1000),'desc':(1000,1350),'code':(1350,1500)}
+        headers=[('Including VAT','gross'),('VAT Amount','vat'),('Taxable Amount','amount'),
+                 ('Unit Price','price'),('Quantity','qty'),('Unit','unit'),
+                 ('Description','desc'),('Item Code','code')]
+        words=[ruled(text,*columns[key],300,columns[key][0]) for text,key in headers]
+        values=[('34.02','gross'),('2.22','vat'),('14.79','amount'),('14.79','price'),
+                ('2','qty'),('PCS','unit'),('Oil HELIX','desc'),('1212','code')]
+        # Every glyph is left-aligned; without grid centres several narrow
+        # neighbouring numeric cells overlap the wrong header tolerance.
+        words += [ruled(text,*columns[key],360,columns[key][0]) for text,key in values]
+        row=table(words)[0][0]
+        self.assertEqual((row['item_code'],row['quantity'],row['unit_price'],row['amount'],row['vat_amount'],row['gross_amount']),
+                         ('1212',2,14.79,14.79,2.22,34.02))
+
     def test_per_unit_printed_columns_validate_without_rewriting_source(self):
         data=dict(supplier={},customer={},invoice={},items=[
             dict(line_no=1,quantity=2,unit_price=14.79,amount=14.79,vat_amount=2.22,discount=0,gross_amount=34.02),
