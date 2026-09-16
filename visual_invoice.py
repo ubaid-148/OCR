@@ -11,7 +11,7 @@ from pathlib import Path
 from time import perf_counter
 from typing import Any, Callable
 
-from invoice_evidence import audit_ai
+from invoice_evidence import audit_ai, date_key
 from layout_invoice import geometry, header_hint
 from local_ai_parser import _validate, parse_invoice_hybrid
 from ollama_http import request_json
@@ -110,6 +110,11 @@ def normalize_full(raw: dict[str, Any], filename: str, language: str,
     for section, keys in TEXT_FIELDS.items():
         source = raw.get(section) if isinstance(raw.get(section), dict) else {}
         data[section] = {key: _text(source.get(key)) for key in keys}
+    invoice_date = data["invoice"].get("date")
+    if invoice_date and re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?", invoice_date):
+        date, time = invoice_date.split("T", 1)
+        data["invoice"]["date"] = date
+        data["invoice"]["time"] = data["invoice"].get("time") or time
     if not data["customer"]["name"]:
         data["customer"]["name"] = data["customer"]["name_ar"] or data["customer"]["name_en"]
     raw_items = raw.get("items") if isinstance(raw.get("items"), list) else []
@@ -307,6 +312,86 @@ def merge_pages(parts: list[dict[str, Any]]) -> tuple[dict[str, Any], list[str]]
     return merged, conflicts
 
 
+def reconcile_with_spatial(data: dict[str, Any], spatial: dict[str, Any]) -> list[str]:
+    """Copy printed, independently located fields; never calculate absent line values."""
+    notes: list[str] = []
+    for section, keys in (("supplier", ("vat_number",)),
+                          ("customer", ("vat_number",)),
+                          ("invoice", ("invoice_number", "date", "date_of_supply", "time")),
+                          ("totals", ("subtotal", "vat_rate", "vat_amount", "net_amount", "currency"))):
+        source = spatial.get(section) or {}
+        for key in keys:
+            source_value = source.get(key)
+            if data[section].get(key) is None and source_value is not None:
+                data[section][key] = source_value
+                notes.append(f"Filled {section}.{key} from positioned OCR; verify against PDF.")
+            elif source_value is not None and data[section].get(key) not in (None, source_value):
+                if key in ("date", "date_of_supply") and date_key(data[section][key]) == date_key(source_value):
+                    continue
+                if key == "vat_number":
+                    data[section][key] = source_value
+                    notes.append(f"Used positioned OCR for conflicting {section}.{key}; verify its role against PDF.")
+                    continue
+                notes.append(f"Vision and positioned OCR disagree on {section}.{key}.")
+
+    # A small VLM may read the right number but put it under an open-ended field
+    # instead of the canonical ID key. Promote only explicit role-labelled IDs.
+    for field in data.get("other_fields", []):
+        label = str(field.get("label") or "").casefold()
+        value = str(field.get("value") or "").strip()
+        target = None
+        if re.search(r"invoice\s*(?:serial|number|no\.?|#)|فاتورة", label):
+            target = ("invoice", "invoice_number")
+        elif re.search(r"seller|supplier|vendor|البائع|المورد", label) and re.search(r"vat|tax|ضريب", label):
+            target = ("supplier", "vat_number")
+        elif re.search(r"buyer|customer|client|المشتري|العميل", label) and re.search(r"vat|tax|ضريب", label):
+            target = ("customer", "vat_number")
+        if target is None or data[target[0]].get(target[1]):
+            continue
+        valid = bool(re.fullmatch(r"[A-Za-z0-9/-]{4,32}", value) and re.search(r"\d", value)) if target[0] == "invoice" else bool(re.fullmatch(r"\d{15}", value))
+        if valid:
+            data[target[0]][target[1]] = value
+            notes.append(f"Filled {target[0]}.{target[1]} from vision-labelled source field; verify against PDF.")
+
+    if data["totals"].get("subtotal") is None and data["vat_summary"].get("before_tax") is not None:
+        data["totals"]["subtotal"] = data["vat_summary"]["before_tax"]
+        notes.append("Filled totals.subtotal from printed VAT summary before_tax; verify against PDF.")
+    if data["vat_summary"].get("tax_amount") is None and data["totals"].get("vat_amount") is not None:
+        data["vat_summary"]["tax_amount"] = data["totals"]["vat_amount"]
+    if (data["totals"].get("vat_amount") is not None and
+            data["vat_summary"].get("inc_tax") == data["totals"].get("vat_amount") and
+            data["totals"].get("net_amount") is not None):
+        data["vat_summary"]["inc_tax"] = data["totals"]["net_amount"]
+        notes.append("VAT summary including-tax value was inconsistent; aligned with printed net total.")
+
+    visual_checks, _ = _validate(data)
+    spatial_checks = spatial.get("validation") or _validate(spatial)[0]
+    spatial_by_code: dict[str, list[tuple[int, dict[str, Any]]]] = {}
+    visual_codes = [item.get("item_code") for item in data["items"]]
+    for index, item in enumerate(spatial.get("items", [])):
+        if item.get("item_code"):
+            spatial_by_code.setdefault(str(item["item_code"]), []).append((index, item))
+    for index, item in enumerate(data["items"]):
+        code = item.get("item_code")
+        matches = spatial_by_code.get(str(code), []) if code else []
+        visual_valid = (visual_checks.get("item_checks", [{}] * len(data["items"]))[index].get("valid") is True)
+        if (len(matches) == 1 and visual_codes.count(code) == 1 and not visual_valid):
+            spatial_index, source = matches[0]
+            source_valid = (spatial_checks.get("item_checks", [{}] * len(spatial.get("items", [])))[spatial_index].get("valid") is True)
+            if source_valid:
+                for key in ("description", "quantity", "unit", "unit_price", "discount",
+                            "amount", "vat_amount", "gross_amount"):
+                    if source.get(key) is not None:
+                        item[key] = source[key]
+                notes.append(f"items[{index}] used a source-positioned row for financial columns; visual columns did not reconcile.")
+                continue
+        if (not visual_valid and item.get("quantity") is None and item.get("unit_price") is None
+                and item.get("amount") is None and item.get("vat_amount") is not None):
+            item["vat_amount"] = None
+            notes.append(f"items[{index}].vat_amount was cleared: its row/column role could not be verified.")
+    return notes
+
+
 def _enrich_spatial_header(fallback: dict[str, Any], visual_data: dict[str, Any]) -> int:
     """Retain printed non-table fields even if the visual item grid is rejected."""
     spatial = fallback["data"]
@@ -370,21 +455,27 @@ def parse_invoice_visual(pdf_path: str | Path, pages: list[dict[str, Any]],
                              visual_header=round(header_seconds, 3),
                              visual_items=round(item_seconds, 3))
         data, conflicts = merge_pages(parts)
+        raw_visual = deepcopy(data)
+        reconciliation_notes = reconcile_with_spatial(data, fallback["data"])
         validation, quality = _validate(data)
         # Audit a copy: Paddle may miss a correct image reading. Keep such a
         # value visible, but never silently claim it is source-verified.
         issues, evidence = audit_ai(deepcopy(data), pages)
         quality.update(parser="visual_ai", model=os.environ.get("OLLAMA_MODEL", "qwen3-vl:4b"),
                        local_ai_status="vision_evidence_reviewed", evidence_issues=issues,
-                       field_evidence=evidence, review_reasons=conflicts,
+                       field_evidence=evidence, review_reasons=conflicts + reconciliation_notes,
                        visual_pages=len(parts))
         data["validation"] = validation
+        quality.update(needs_review=True, overall_status="needs_review")
+        quality["review_reasons"].append(
+            "Vision-transcribed names, addresses, and item descriptions are not independently source-verified.")
         if validation.get("line_vat_sum_matches") is False:
             quality["review_reasons"].append(
                 "Printed line VAT sum differs from document VAT; source amounts are preserved.")
-        if issues or conflicts:
+        if issues or conflicts or reconciliation_notes:
             quality.update(needs_review=True, overall_status="needs_review")
-        visual = {"data": data, "quality": quality, "stage_timings": stage_timings}
+        visual = {"data": data, "quality": quality, "stage_timings": stage_timings,
+                  "raw_visual_candidate": raw_visual}
         # A visually plausible but column-shifted table must not supersede an
         # independently parsed one. Keep its candidate in detailed debug JSON.
         critical = any(issue.get("field") == "items.row_order" for issue in issues)
@@ -413,9 +504,10 @@ def parse_invoice_visual(pdf_path: str | Path, pages: list[dict[str, Any]],
             fallback["visual_candidate"] = visual
             return fallback
         if not financial:
-            quality.update(needs_review=True, overall_status="needs_review")
+            quality.update(parser="visual_spatial_review", local_ai_status="incomplete_reconciled",
+                           needs_review=True, overall_status="needs_review")
             quality.setdefault("review_reasons", []).append(
-                "Visual line arithmetic or totals did not fully reconcile; inspect the original PDF.")
+                "Financial item rows remain incomplete or inconsistent; do not import this invoice without source review.")
         return visual
     except VisionScopeError as error:
         partial = normalize_full(error.partial_header, filename, language, error.page_number)

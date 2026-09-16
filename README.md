@@ -47,8 +47,10 @@ Open <http://127.0.0.1:8765> and upload a PDF invoice.
 
 Cell 6 automatically runs one real `9498.pdf` regression through the Colab app
 and prints pass/fail for known invoice identifiers, all three item rows, totals,
-and runtime. Disable `RUN_9498_CHECK` to skip it. This single-document check
-does not establish accuracy across the other layouts.
+and runtime. Disable `RUN_9498_CHECK` to skip it. The v11 GPU result passed only
+6/17 checks despite returning `parser=visual_ai`; v12 gates incomplete financial
+rows as `visual_spatial_review` and never treats a partial score as accuracy.
+This single-document check does not establish accuracy across other layouts.
 
 ## Private multi-layout training
 
@@ -99,7 +101,7 @@ crops when rows are missing or a detected row loses/collides with a printed colu
 Missing totals and source arithmetic discrepancies no longer trigger a costly
 whole-table retry; they use focused footer crops and remain flagged for review.
 Header fields can be recovered independently of table detection. Responses carry
-`pipeline_version: 2026-09-split-vision-v11` to identify this flow.
+`pipeline_version: 2026-09-evidence-gated-v12` to identify this flow.
 Typed candidates below 85% confidence are not promoted; raw alternatives remain in the
 OCR output. Set `OCR_TARGETED_RETRY=false` to disable retries. Both recognition
 models are cached after first use. Retry failures preserve the base OCR and flag

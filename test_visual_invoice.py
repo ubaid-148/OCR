@@ -3,7 +3,7 @@ import unittest
 from unittest.mock import patch
 
 from invoice_response import clean_invoice_response
-from visual_invoice import ask_visual, merge_pages, normalize_full, parse_invoice_visual
+from visual_invoice import ask_visual, merge_pages, normalize_full, parse_invoice_visual, reconcile_with_spatial
 
 
 def visual_raw():
@@ -123,6 +123,18 @@ class VisualInvoiceTests(unittest.TestCase):
         self.assertTrue(result["quality"]["needs_review"])
         self.assertFalse(result["data"]["validation"]["line_vat_sum_matches"])
 
+    def test_incomplete_financial_rows_cannot_be_accepted_as_visual_ai(self):
+        raw = visual_raw()
+        raw["items"][0].update(quantity=None, unit_price=None, amount=None, vat_amount=14.79)
+        with patch("visual_invoice.parse_invoice_hybrid", return_value=fallback()), \
+             patch("visual_invoice.render_pages", return_value=[(1, 1, "IMAGE")]), \
+             patch("visual_invoice.ask_visual", return_value=raw), \
+             patch("visual_invoice.audit_ai", return_value=([], {})):
+            result = parse_invoice_visual("unused.pdf", [], "9498.pdf", "eng+ara")
+        self.assertEqual(result["quality"]["parser"], "visual_spatial_review")
+        self.assertTrue(result["quality"]["needs_review"])
+        self.assertIsNone(result["data"]["items"][0]["vat_amount"])
+
     def test_fast_mode_never_renders_or_calls_model(self):
         with patch("visual_invoice.parse_invoice_hybrid", return_value=fallback()), \
              patch("visual_invoice.render_pages") as render:
@@ -149,6 +161,45 @@ class VisualInvoiceTests(unittest.TestCase):
         self.assertEqual(result["data"]["invoice"]["invoice_number"], "INV-123")
         self.assertEqual(result["data"]["totals"]["subtotal"], 94.81)
         self.assertTrue(result["quality"]["needs_review"])
+
+    def test_incomplete_visual_rows_are_reconciled_without_inventing_first_row(self):
+        raw = visual_raw()
+        raw["supplier"]["vat_number"] = None
+        raw["invoice"]["invoice_number"] = None
+        raw["invoice"]["date"] = "2026-03-09T11:19:38"
+        raw["customer"]["vat_number"] = None
+        raw["totals"]["subtotal"] = None
+        raw["totals"]["vat_rate"] = None
+        raw["totals"]["currency"] = None
+        raw["vat_summary"]["inc_tax"] = 14.22
+        raw["other_fields"] = [{"label": "Invoice Serial", "value": "2690111862"}]
+        for item, wrong_vat in zip(raw["items"], (14.79, 50.44, 14.79)):
+            item.update(description=None, quantity=None, unit_price=None, amount=None,
+                        vat_amount=wrong_vat)
+        data = normalize_full(raw, "9498.pdf", "eng+ara")
+        spatial = {"supplier": {"vat_number": "310981818100003"},
+                   "invoice": {}, "customer": {"vat_number": "300402905100003"},
+                   "items": [
+                       {"item_code": "1218", "description": "Oil HELIX 4L", "quantity": 1,
+                        "unit_price": 50.44, "amount": 50.44, "vat_amount": 7.57,
+                        "gross_amount": 58.01},
+                       {"item_code": "5007", "description": "Toyota filter", "quantity": 1,
+                        "unit_price": 14.79, "amount": 14.79, "vat_amount": 2.22,
+                        "gross_amount": 17.01}],
+                   "totals": {"vat_rate": 15, "vat_amount": 14.22, "currency": "SAR"}}
+        notes = reconcile_with_spatial(data, spatial)
+        self.assertTrue(notes)
+        self.assertEqual(data["invoice"]["invoice_number"], "2690111862")
+        self.assertEqual(data["invoice"]["date"], "2026-03-09")
+        self.assertEqual(data["invoice"]["time"], "11:19:38")
+        self.assertEqual(data["supplier"]["vat_number"], "310981818100003")
+        self.assertEqual(data["customer"]["vat_number"], "300402905100003")
+        self.assertEqual(data["totals"]["subtotal"], 94.81)
+        self.assertEqual(data["items"][0]["item_code"], "1212")
+        self.assertIsNone(data["items"][0]["vat_amount"])
+        self.assertIsNone(data["items"][0]["quantity"])
+        self.assertEqual(data["items"][1]["vat_amount"], 7.57)
+        self.assertEqual(data["items"][2]["vat_amount"], 2.22)
 
 
 if __name__ == "__main__":

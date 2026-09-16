@@ -265,7 +265,7 @@ class Handler(BaseHTTPRequestHandler):
                     "total": round(perf_counter() - started, 3),
                 }
                 payload["ocr_device"] = coordinate_payload.get("device", "unknown")
-                payload["pipeline_version"] = "2026-09-split-vision-v11"
+                payload["pipeline_version"] = "2026-09-evidence-gated-v12"
                 payload["schema_version"] = "1.0"
                 payload["status"] = payload.get("quality", {}).get("overall_status", "extracted")
                 payload["extraction_methods"] = [p.get("extraction_method", "ocr") for p in coordinate_payload["pages"]]
