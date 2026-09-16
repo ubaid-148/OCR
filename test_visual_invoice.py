@@ -60,13 +60,38 @@ class VisualInvoiceTests(unittest.TestCase):
         self.assertEqual(response["data"]["other_fields"][0]["page"], 2)
 
     def test_request_sends_original_image_not_ocr_boxes(self):
-        with patch("visual_invoice.request_json", return_value={"done": True,
-                "message": {"content": "{}"}}) as request:
+        responses = [{"done": True, "message": {"content": "{}"}},
+                     {"done": True, "message": {"content": '{"items":[]}'}}]
+        with patch("visual_invoice.request_json", side_effect=responses) as request:
             ask_visual(["FULLPAGE", "TABLECROP"], 1, 1)
-        body = request.call_args.args[1]
-        self.assertEqual(body["messages"][0]["images"], ["FULLPAGE", "TABLECROP"])
-        self.assertIn("document_type_ar", body["format"]["properties"])
-        self.assertEqual(body["model"], "qwen3-vl:4b")
+        self.assertEqual(request.call_count, 2)
+        header = request.call_args_list[0].args[1]
+        items = request.call_args_list[1].args[1]
+        self.assertEqual(header["messages"][0]["images"], ["FULLPAGE"])
+        self.assertEqual(items["messages"][0]["images"], ["FULLPAGE", "TABLECROP"])
+        self.assertIn("document_type_ar", header["format"]["properties"])
+        self.assertNotIn("items", header["format"]["properties"])
+        self.assertNotIn("required", header["format"]["properties"]["supplier"])
+        self.assertEqual(list(items["format"]["properties"]), ["items"])
+        self.assertEqual(items["model"], "qwen3-vl:4b")
+
+    def test_truncated_scope_is_rejected_with_token_count(self):
+        with patch("visual_invoice.request_json", return_value={"done": True,
+                "done_reason": "length", "eval_count": 4096, "message": {"content": "{}"}}):
+            with self.assertRaisesRegex(ValueError, "header output for page 1 was truncated.*4096"):
+                ask_visual("FULLPAGE", 1, 1)
+
+    def test_focused_responses_combine_without_requiring_null_keys(self):
+        responses = [
+            {"done": True, "message": {"content": '{"supplier":{"vat_number":"310981818100003"},"invoice":{"invoice_number":"2690111862"},"customer":{},"totals":{}}'}},
+            {"done": True, "message": {"content": '{"items":[{"item_code":"1212","quantity":2,"unit_price":14.79}]}'}}
+        ]
+        with patch("visual_invoice.request_json", side_effect=responses):
+            raw = ask_visual("FULLPAGE", 1, 1)
+        data = normalize_full(raw, "9498.pdf", "eng+ara")
+        self.assertEqual(data["supplier"]["vat_number"], "310981818100003")
+        self.assertEqual(data["items"][0]["quantity"], 2)
+        self.assertIsNone(data["customer"]["name"])
 
     def test_two_pages_keep_all_rows_and_flag_conflicting_totals(self):
         first = normalize_full(visual_raw(), "x.pdf", "eng")
@@ -110,6 +135,19 @@ class VisualInvoiceTests(unittest.TestCase):
              patch("visual_invoice.render_pages", side_effect=OSError("render failed")):
             result = parse_invoice_visual("unused.pdf", [], "x.pdf", "eng")
         self.assertEqual(result["quality"]["local_ai_status"], "failed")
+        self.assertTrue(result["quality"]["needs_review"])
+
+    def test_item_failure_keeps_completed_header_with_review(self):
+        header = {"supplier": {"name_en": "Example Trading"},
+                  "invoice": {"invoice_number": "INV-123"},
+                  "customer": {}, "totals": {"subtotal": 94.81}}
+        with patch("visual_invoice.parse_invoice_hybrid", return_value=fallback()), \
+             patch("visual_invoice.render_pages", return_value=[(1, 1, ["IMAGE"])]), \
+             patch("visual_invoice._ask_scope", side_effect=[header, ValueError("items truncated")]):
+            result = parse_invoice_visual("unused.pdf", [], "x.pdf", "eng")
+        self.assertEqual(result["quality"]["parser"], "spatial_fallback")
+        self.assertEqual(result["data"]["invoice"]["invoice_number"], "INV-123")
+        self.assertEqual(result["data"]["totals"]["subtotal"], 94.81)
         self.assertTrue(result["quality"]["needs_review"])
 
 

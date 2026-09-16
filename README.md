@@ -71,7 +71,7 @@ Selected faint English table crops use 400 DPI with contrast and stroke thickeni
 This does not guarantee recovery: uncertain fields remain null and require review.
 
 Uploads default to Accuracy (full-page vision plus OCR, validation and review). Fast explicitly skips AI;
-Colab allows a 180-second socket timeout **per page** and up to 4096 generated tokens per page. The page shows
+Accuracy makes two focused vision requests per page (non-table fields, then item rows) to reduce the one-shot JSON truncation seen on `9498.pdf`. A long page can still exceed the 4096-token output limit and will be flagged for review. Colab allows a 180-second socket timeout **per request**. The page shows
 the current OCR stage and elapsed time and displays formatted JSON without navigation.
 Concurrent uploads receive HTTP 429 instead of accumulating in the native OCR queue.
 Colab loads Arabic and English OCR models during server startup, so model download
@@ -99,7 +99,7 @@ crops when rows are missing or a detected row loses/collides with a printed colu
 Missing totals and source arithmetic discrepancies no longer trigger a costly
 whole-table retry; they use focused footer crops and remain flagged for review.
 Header fields can be recovered independently of table detection. Responses carry
-`pipeline_version: 2026-09-image-first-v10` to identify this flow.
+`pipeline_version: 2026-09-split-vision-v11` to identify this flow.
 Typed candidates below 85% confidence are not promoted; raw alternatives remain in the
 OCR output. Set `OCR_TARGETED_RETRY=false` to disable retries. Both recognition
 models are cached after first use. Retry failures preserve the base OCR and flag
@@ -125,8 +125,9 @@ from cell 1 after an update; an existing running server retains its old imports.
    Image-bearing, rotated, sparse or invalid-text pages use PaddleOCR at 200 DPI.
 3. Paddle models load only when a page needs OCR, and remain cached across uploads.
 4. The spatial parser builds a fallback from positioned OCR boxes. Accuracy mode
-   separately renders **each original page** into memory and sends that image to
-   Ollama's vision model; pages are merged without dropping later-page items.
+   separately renders **each original page** into memory and sends it to
+   Ollama's vision model in bounded header and item-table passes; pages are
+   merged without dropping later-page items.
 5. Vision output is checked against line arithmetic, totals, OCR identifiers and
    item-code order. OCR misses do not silently erase an image reading: they flag
    review. A swapped/shorter table, or a result weaker than a validated spatial
@@ -180,7 +181,7 @@ parsing appears complete, because layout checks alone cannot verify full names o
 addresses. Fast mode skips AI entirely; unfamiliar layouts may need more manual
 review. Both modes keep the 200 DPI base OCR resolution.
 `USE_LOCAL_AI=false` disables AI globally. `OLLAMA_TIMEOUT_SECONDS` defaults to
-180 seconds for image-first requests (HTTP socket timeout per page, not an overall job deadline). Ollama is asked
+180 seconds for image-first requests (HTTP socket timeout per request, not an overall job deadline). Ollama is asked
 to keep its model loaded for 30 minutes.
 
 JSON output includes `timings_seconds` for base render/OCR, targeted retries,
@@ -231,7 +232,7 @@ Colab now preloads Ollama during cell 3 and displays `ollama ps` to show GPU/CPU
 placement. Image chat requests use an explicit 16384-token context, configurable with
 `OLLAMA_NUM_CTX`. Preloading follows the [Ollama API guidance](https://docs.ollama.com/faq#how-can-i-preload-a-model-into-ollama-to-get-faster-response-times).
 Truncated AI responses are rejected. Setup loading has a 180-second socket
-timeout; invoice image requests use a 180-second socket timeout per page. These changes
+timeout; invoice image requests use a 180-second socket timeout per request. These changes
 have local regression coverage, not a measured accuracy percentage across a
 production invoice dataset or a live Colab/Ollama benchmark.
 

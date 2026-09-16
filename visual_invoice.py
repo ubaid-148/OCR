@@ -35,8 +35,9 @@ VAT_NUMBERS = ("before_tax", "tax_amount", "inc_tax")
 def _object_schema(text_fields=(), number_fields=()):
     properties = {key: {"type": ["string", "null"]} for key in text_fields}
     properties.update({key: {"type": ["number", "null"]} for key in number_fields})
-    return {"type": "object", "properties": properties, "required": list(properties),
-            "additionalProperties": False}
+    # A small vision model need not spend output tokens spelling out dozens of
+    # null keys. normalize_full() supplies nulls after the response is parsed.
+    return {"type": "object", "properties": properties, "additionalProperties": False}
 
 
 FULL_SCHEMA = {
@@ -59,7 +60,24 @@ FULL_SCHEMA = {
             "required": ["label", "value", "page"]}},
     },
 }
-FULL_SCHEMA["required"] = list(FULL_SCHEMA["properties"])
+FULL_SCHEMA["required"] = ["supplier", "invoice", "customer", "items", "totals"]
+HEADER_SCHEMA = {
+    "type": "object", "additionalProperties": False,
+    "properties": {key: value for key, value in FULL_SCHEMA["properties"].items() if key != "items"},
+    "required": ["supplier", "invoice", "customer", "totals"],
+}
+ITEMS_SCHEMA = {
+    "type": "object", "additionalProperties": False,
+    "properties": {"items": FULL_SCHEMA["properties"]["items"]},
+    "required": ["items"],
+}
+
+
+class VisionScopeError(ValueError):
+    def __init__(self, message: str, partial_header: dict[str, Any], page_number: int):
+        super().__init__(message)
+        self.partial_header = partial_header
+        self.page_number = page_number
 
 
 def _text(value):
@@ -185,42 +203,82 @@ def render_pages(pdf_path: str | Path, ocr_pages: list[dict[str, Any]] | None = 
         document.close()
 
 
-def ask_visual(images: list[str] | str, page_number: int, page_count: int) -> dict[str, Any]:
+def _ask_scope(images: list[str], page_number: int, page_count: int,
+               scope: str) -> dict[str, Any]:
+    if scope == "header":
+        schema = HEADER_SCHEMA
+        scope_images = images[:1]
+        prompt = (
+            f"Read ORIGINAL invoice page {page_number} of {page_count}. Extract only NON-TABLE "
+            "fields: document type, seller, invoice dates/number/payment, buyer, VAT summary, "
+            "totals, handwritten notes and other labelled fields. Do not list or summarize item "
+            "rows in this response. Keep supplier and customer names/addresses/VAT IDs separate. "
+            "Keep invoice date and supply date separate. Preserve printed Arabic and English "
+            "names, codes and address components exactly; do not invent translations. "
+            "Use ISO YYYY-MM-DD for unambiguous Gregorian dates. Omit keys not visible on THIS "
+            "page. Do not put a label, code or address in a name field. Return only JSON."
+        )
+    elif scope == "items":
+        schema = ITEMS_SCHEMA
+        scope_images = images
+        prompt = (
+            f"Read ORIGINAL invoice page {page_number} of {page_count}. Extract only the ITEM "
+            "TABLE rows in top-to-bottom printed order. Image 1 is the full page; if image 2 "
+            "exists it is a sharper crop of the SAME table, not another invoice. Return every "
+            "visible row once. Keep complete Arabic/Latin product descriptions, SKU codes as "
+            "strings, quantity, unit, unit price, printed discount, taxable amount, VAT amount, "
+            "tax rate/code and gross in their own columns. Some invoices print taxable amount "
+            "and VAT PER UNIT but gross as extended row total: transcribe the printed values "
+            "without recalculating them. Do not include totals/footer as item rows. Omit "
+            "unprinted keys; return items:[] only when no item rows are visible. Return only JSON."
+        )
+    else:
+        raise ValueError(f"Unsupported vision scope: {scope}")
     model = os.environ.get("OLLAMA_MODEL", "qwen3-vl:4b")
-    images = [images] if isinstance(images, str) else images
-    prompt = (
-        f"Read the ORIGINAL invoice image (page {page_number} of {page_count}) and return JSON. "
-        "Image 1 is the full page; if there is an image 2, it is a sharper crop of "
-        "the SAME page's item table, not a second invoice. "
-        "The image, not inferred arithmetic, is the source of truth. Extract every visible field and "
-        "EVERY item row in printed top-to-bottom order. Keep Arabic and English names/descriptions "
-        "separately when printed; do not invent translations or expand unreadable text. "
-        "Distinguish supplier and customer sections/addresses/VAT IDs. Keep invoice date and date of "
-        "supply separate. Preserve codes as strings, printed quantity, unit price, taxable amount, "
-        "VAT and gross in their own columns. On some invoices taxable/VAT are PER UNIT while gross "
-        "is an extended line total: transcribe each printed value without recalculating it. "
-        "Use ISO YYYY-MM-DD for unambiguous Gregorian dates; otherwise retain printed text. "
-        "Put other labelled fields not covered by the schema in other_fields. "
-        "For fields not visible on THIS page use null, for absent rows use an empty array. "
-        "Do not put a label, code or address in a name field."
-    )
+    predict_limit = int(os.environ.get("OLLAMA_NUM_PREDICT", "4096"))
     body = {
-        "model": model, "stream": False, "format": FULL_SCHEMA, "keep_alive": "30m",
+        "model": model, "stream": False, "format": schema, "keep_alive": "30m",
         "options": {"temperature": 0, "num_ctx": int(os.environ.get("OLLAMA_NUM_CTX", "16384")),
-                    "num_predict": int(os.environ.get("OLLAMA_NUM_PREDICT", "4096"))},
-        "messages": [{"role": "user", "content": prompt, "images": images}],
+                    "num_predict": predict_limit},
+        "messages": [{"role": "user", "content": prompt, "images": scope_images}],
     }
     response = request_json(os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434/api/chat"),
                             body, timeout=float(os.environ.get("OLLAMA_TIMEOUT_SECONDS", "180")))
     if response.get("error"):
-        raise ValueError(f"Ollama vision error: {response['error']}")
+        raise ValueError(f"Ollama {scope} error: {response['error']}")
     if response.get("done") is False or response.get("done_reason") == "length":
-        raise ValueError(f"Vision output for page {page_number} was truncated")
+        raise ValueError(f"Vision {scope} output for page {page_number} was truncated "
+                         f"(generated {response.get('eval_count', '?')} / {predict_limit} tokens)")
     content = response.get("message", {}).get("content")
     parsed = json.loads(content) if isinstance(content, str) else content
     if not isinstance(parsed, dict):
-        raise ValueError(f"Vision output for page {page_number} was not an object")
+        raise ValueError(f"Vision {scope} output for page {page_number} was not an object")
     return parsed
+
+
+def ask_visual(images: list[str] | str, page_number: int, page_count: int,
+               progress: Callable[[str], None] | None = None) -> dict[str, Any]:
+    """Two bounded image reads avoid one huge, truncated full-invoice response."""
+    images = [images] if isinstance(images, str) else images
+    if progress:
+        progress(f"Reading page {page_number}/{page_count}: header and totals")
+    header_started = perf_counter()
+    header = _ask_scope(images, page_number, page_count, "header")
+    header_seconds = perf_counter() - header_started
+    if progress:
+        progress(f"Reading page {page_number}/{page_count}: item table")
+    item_started = perf_counter()
+    try:
+        items = _ask_scope(images, page_number, page_count, "items")
+    except (OSError, ValueError, RuntimeError) as error:
+        raise VisionScopeError(str(error), header, page_number) from error
+    item_seconds = perf_counter() - item_started
+    if not isinstance(items.get("items"), list):
+        raise VisionScopeError(f"Vision item response for page {page_number} omitted the items array",
+                               header, page_number)
+    header["items"] = items["items"]
+    header["_vision_timings"] = {"visual_header": header_seconds, "visual_items": item_seconds}
+    return header
 
 
 def merge_pages(parts: list[dict[str, Any]]) -> tuple[dict[str, Any], list[str]]:
@@ -250,7 +308,7 @@ def merge_pages(parts: list[dict[str, Any]]) -> tuple[dict[str, Any], list[str]]
 
 
 def _enrich_spatial_header(fallback: dict[str, Any], visual_data: dict[str, Any]) -> int:
-    """Retain non-table visual fields even if the visual item grid is rejected."""
+    """Retain printed non-table fields even if the visual item grid is rejected."""
     spatial = fallback["data"]
     added = 0
     for key in ("document_type", "document_type_ar", "amount_in_words_ar"):
@@ -262,6 +320,12 @@ def _enrich_spatial_header(fallback: dict[str, Any], visual_data: dict[str, Any]
         for key in keys:
             if not spatial_section.get(key) and visual_data[section].get(key):
                 spatial_section[key] = visual_data[section][key]
+                added += 1
+    for section in ("totals", "vat_summary"):
+        spatial_section = spatial.setdefault(section, {})
+        for key, value in visual_data[section].items():
+            if spatial_section.get(key) is None and value is not None:
+                spatial_section[key] = value
                 added += 1
     for key in ("handwritten_notes", "other_fields"):
         if not spatial.get(key) and visual_data.get(key):
@@ -286,16 +350,25 @@ def parse_invoice_visual(pdf_path: str | Path, pages: list[dict[str, Any]],
         render_started = perf_counter()
         render_seconds = 0.0
         ai_seconds = 0.0
+        header_seconds = 0.0
+        item_seconds = 0.0
         for number, count, images in render_pages(pdf_path, pages):
             render_seconds += perf_counter() - render_started
             if progress:
                 progress(f"Reading original page {number} of {count} with vision AI")
             ai_started = perf_counter()
-            parts.append(normalize_full(ask_visual(images, number, count), filename, language, number))
+            raw = ask_visual(images, number, count, progress=progress)
+            scope_timings = raw.pop("_vision_timings", {})
+            header_seconds += scope_timings.get("visual_header", 0)
+            item_seconds += scope_timings.get("visual_items", 0)
+            parts.append(normalize_full(raw,
+                                        filename, language, number))
             ai_seconds += perf_counter() - ai_started
             render_started = perf_counter()
         stage_timings.update(visual_render=round(render_seconds, 3),
-                             visual_ai=round(ai_seconds, 3))
+                             visual_ai=round(ai_seconds, 3),
+                             visual_header=round(header_seconds, 3),
+                             visual_items=round(item_seconds, 3))
         data, conflicts = merge_pages(parts)
         validation, quality = _validate(data)
         # Audit a copy: Paddle may miss a correct image reading. Keep such a
@@ -344,6 +417,19 @@ def parse_invoice_visual(pdf_path: str | Path, pages: list[dict[str, Any]],
             quality.setdefault("review_reasons", []).append(
                 "Visual line arithmetic or totals did not fully reconcile; inspect the original PDF.")
         return visual
+    except VisionScopeError as error:
+        partial = normalize_full(error.partial_header, filename, language, error.page_number)
+        added = _enrich_spatial_header(fallback, partial)
+        if added:
+            fallback_checks, refreshed = _validate(fallback["data"])
+            fallback["data"]["validation"] = fallback_checks
+            fallback["quality"]["missing_fields"] = refreshed["missing_fields"]
+        fallback["quality"].update(parser="spatial_fallback", local_ai_status="failed",
+                                   local_ai_error=str(error)[:2000], needs_review=True,
+                                   overall_status="needs_review")
+        fallback["quality"].setdefault("review_reasons", []).append(
+            "Item-table vision failed; completed image header/totals filled missing spatial fields and need manual review.")
+        return fallback
     except (OSError, ValueError, RuntimeError, KeyError, TypeError, json.JSONDecodeError) as error:
         fallback["quality"].update(parser="spatial_fallback", local_ai_status="failed",
                                    local_ai_error=str(error)[:2000], needs_review=True,
