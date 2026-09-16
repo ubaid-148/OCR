@@ -9,6 +9,7 @@ uploads/*
 *.log
 .env
 qa_samples/
+benchmark_outputs/
 training_data/
 training_workspace/
 model_artifacts/
