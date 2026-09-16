@@ -12,7 +12,7 @@ The target is layout-independent extraction, not memorizing a supplier template.
 
 Open [`colab_dataset.ipynb`](https://colab.research.google.com/github/ubaid-148/OCR/blob/main/colab_dataset.ipynb) in a GPU Colab runtime.
 
-1. Sign in to Colab and add a fine-grained `GITHUB_TOKEN` in **Colab Secrets**. Restrict it to `ubaid-148/OCR` with **Contents: Read and write**. Never paste the token into notebook cells, Git remotes or chat. [GitHub token permissions](https://docs.github.com/en/rest/releases/releases).
+1. Sign in to Colab. Before running cell 7, add a fine-grained `GITHUB_TOKEN` in **Colab Secrets** and enable **Notebook access**. Restrict the token to `ubaid-148/OCR` with **Contents: Read and write**. Cells 1-6 can run without a token. Never paste the token into notebook cells, Git remotes or chat. [GitHub token guidance](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens).
 2. Use a GPU runtime and run dataset cells 1-6. They clone the public repo, render the PDFs and generate OCR drafts in temporary `/content/invoice_ocr_work`. No PDF or Drive upload is needed.
 3. In the dashboard, compare every field and item row with the source pages. Check seller versus customer address, all printed rows and columns, handwritten notes and dates. Use **Verify + include** only for complete ground truth. Use **Verify + exclude** for duplicates, non-invoices and unreadable sources. Leave genuinely absent fields `null`; do not trust unchecked OCR/cloud drafts.
 4. After each review batch, run cell 7 to commit and push verified labels to the public repo. Do this **before** Colab disconnects. Cells 8-9 show validation progress and an optional local export preview. Arithmetic differences are warnings because printed values must not be silently replaced by calculations.
@@ -23,7 +23,7 @@ The annotator also accepts a pasted app response, debug response, or cloud-style
 
 ## Phase 2: adapter training and held-out evaluation
 
-Start a fresh GPU runtime and open [`colab_train.ipynb`](https://colab.research.google.com/github/ubaid-148/OCR/blob/main/colab_train.ipynb). It clones the PDFs and pushed labels, rebuilds images/exports without Drive, then uses the official Qwen VL training framework with `Qwen/Qwen3-VL-2B-Instruct`, LoRA on attention projections, deterministic evaluation and SDPA for Colab compatibility. Keep `GITHUB_TOKEN` in Colab Secrets so the approved adapter can be published after training.
+Start a fresh GPU runtime and open [`colab_train.ipynb`](https://colab.research.google.com/github/ubaid-148/OCR/blob/main/colab_train.ipynb). It clones the PDFs and pushed labels, rebuilds images/exports without Drive, then uses the official Qwen VL training framework with `Qwen/Qwen3-VL-2B-Instruct`, LoRA on attention projections, deterministic evaluation and SDPA for Colab compatibility. The first cells do not require `GITHUB_TOKEN`; keep it in Colab Secrets with Notebook access enabled before cell 11 so the approved adapter can be published after training.
 
 The notebook follows this order:
 
