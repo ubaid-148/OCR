@@ -1,0 +1,9 @@
+{
+  "reference_status": "user_supplied_numeric_values_not_source_verified",
+  "items": [
+    {"item_code": "1212", "quantity": 2, "unit_price": 14.79, "amount": 14.79, "vat_rate": "15%", "vat_amount": 2.22, "gross_amount": 34.02},
+    {"item_code": "1218", "quantity": 1, "unit_price": 50.44, "amount": 50.44, "vat_rate": "15%", "vat_amount": 7.57, "gross_amount": 58.01},
+    {"item_code": "5007", "quantity": 1, "unit_price": 14.79, "amount": 14.79, "vat_rate": "15%", "vat_amount": 2.22, "gross_amount": 17.01}
+  ],
+  "totals": {"subtotal": 94.81, "vat_amount": 14.22, "net_amount": 109.03}
+}
