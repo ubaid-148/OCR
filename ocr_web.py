@@ -40,6 +40,19 @@ def accuracy_gpu_configured(mode: str) -> bool:
     return os.environ.get("OCR_DEVICE", "").lower().startswith("gpu")
 
 
+def multipart_form_fields(message) -> dict[str, object]:
+    """Read every multipart form field, including the first text field.
+
+    ``iter_attachments`` skips a candidate body part, which is inappropriate
+    for form-data and can silently drop the language selector.
+    """
+    return {
+        name: part
+        for part in message.iter_parts()
+        if (name := part.get_param("name", header="content-disposition"))
+    }
+
+
 def page(message: str = "") -> bytes:
     safe_message = f'<p class="message">{html.escape(message)}</p>' if message else ""
     return f"""<!doctype html>
@@ -138,10 +151,11 @@ class Handler(BaseHTTPRequestHandler):
         message = BytesParser(policy=policy.default).parsebytes(
             f"Content-Type: {content_type}\r\nMIME-Version: 1.0\r\n\r\n".encode() + body
         )
-        pdf_part = next((part for part in message.iter_attachments() if part.get_param("name", header="content-disposition") == "pdf"), None)
-        language_part = next((part for part in message.iter_attachments() if part.get_param("name", header="content-disposition") == "languages"), None)
-        format_part = next((part for part in message.iter_attachments() if part.get_param("name", header="content-disposition") == "format"), None)
-        mode_part = next((part for part in message.iter_attachments() if part.get_param("name", header="content-disposition") == "mode"), None)
+        fields = multipart_form_fields(message)
+        pdf_part = fields.get("pdf")
+        language_part = fields.get("languages")
+        format_part = fields.get("format")
+        mode_part = fields.get("mode")
         mode = "auto" if mode_part and mode_part.get_content().strip() == "auto" else "fast"
         if not accuracy_gpu_configured(mode):
             self.send_failure("Accuracy mode needs a GPU. In Colab select Runtime > Change runtime type > T4 GPU, reconnect, and rerun all cells; Fast mode remains available on CPU.", 400)
