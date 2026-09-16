@@ -16,7 +16,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs
 
-from local_ai_parser import parse_invoice_hybrid
+from visual_invoice import parse_invoice_visual
 from pdf_errors import InvalidPDFError
 from invoice_response import clean_invoice_response
 
@@ -88,16 +88,16 @@ button:hover {{ background:#0f4b3d; }}
 .hint {{ color:#55736b; font-size:14px; }}
 </style></head><body><main>
 <h1>OCR PDF Lab</h1>
-<p>Upload an invoice PDF. PaddleOCR reads it, local AI understands the layout, and validation checks the totals.</p>
-<p class="hint"><strong>Parser:</strong> Hybrid Local AI v2 (Ollama + spatial fallback)</p>
+<p>Upload an invoice PDF. Accuracy mode reads the original page images with a vision model and checks the result against OCR and invoice arithmetic.</p>
+<p class="hint"><strong>Parser:</strong> Image-first local vision AI with spatial OCR fallback.</p>
 {safe_message}
 <form method="post" enctype="multipart/form-data">
 <label>PDF file<input type="file" name="pdf" accept="application/pdf,.pdf" required></label>
 <label>Languages<select name="languages"><option value="eng+ara">English + Arabic</option><option value="eng">English only</option><option value="ara">Arabic only</option><option value="eng+urd">English + Urdu</option></select></label>
-<label>Processing<select name="mode"><option value="auto">Accuracy (OCR + AI review when needed)</option><option value="fast">Fast (OCR + validation only)</option></select></label>
+<label>Processing<select name="mode"><option value="auto">Accuracy (original PDF image + OCR cross-check)</option><option value="fast">Fast (spatial OCR + validation only)</option></select></label>
 <label>Output<select name="format"><option value="invoice">Invoice JSON</option><option value="invoice_debug">Detailed invoice JSON (debug)</option><option value="json">Raw OCR JSON (technical boxes)</option></select></label>
 <p class="hint">PaddleOCR uses Arabic recognition for Arabic/Urdu selections; it also handles Latin text and numbers.</p>
-<button type="submit">Run PaddleOCR</button>
+<button type="submit">Extract Invoice</button>
 </form><p id="progress" role="status" aria-live="polite"></p><pre id="result" style="white-space:pre-wrap;overflow-wrap:anywhere"></pre>
 <script src="/app.js"></script></main></body></html>""".encode("utf-8")
 
@@ -240,9 +240,10 @@ class Handler(BaseHTTPRequestHandler):
                     "pages": coordinate_payload["pages"],
                 }
                 if output_format in {"invoice", "invoice_debug"}:
-                    progress('Validating invoice' if mode == 'fast' else 'Validating invoice / optional AI review')
-                    payload = parse_invoice_hybrid(
-                        coordinate_payload["pages"], filename, languages, mode=mode
+                    progress('Validating invoice' if mode == 'fast' else 'Reading original PDF page images and validating invoice')
+                    payload = parse_invoice_visual(
+                        input_path, coordinate_payload["pages"], filename, languages,
+                        mode=mode, progress=progress
                     )
                     # Preserve the evidence when parsing fails, without another OCR run.
                     if payload.get("quality", {}).get("needs_review"):
@@ -250,11 +251,12 @@ class Handler(BaseHTTPRequestHandler):
                 payload["timings_seconds"] = {
                     **coordinate_payload.get("timings_seconds", {}),
                     "ocr_total": round(ocr_finished - started, 3),
+                    **payload.get("stage_timings", {}),
                     "invoice_parser": round(perf_counter() - ocr_finished, 3),
                     "total": round(perf_counter() - started, 3),
                 }
                 payload["ocr_device"] = coordinate_payload.get("device", "unknown")
-                payload["pipeline_version"] = coordinate_payload.get("pipeline_version", "unknown")
+                payload["pipeline_version"] = "2026-09-image-first-v10"
                 payload["schema_version"] = "1.0"
                 payload["status"] = payload.get("quality", {}).get("overall_status", "extracted")
                 payload["extraction_methods"] = [p.get("extraction_method", "ocr") for p in coordinate_payload["pages"]]

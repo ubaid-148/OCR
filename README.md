@@ -1,16 +1,18 @@
 # Local Invoice OCR
 
-Local web application that extracts positioned text from invoice PDFs with
-PaddleOCR, converts it to structured invoice JSON with Ollama, and validates
-invoice arithmetic. If Ollama is unavailable or its output fails validation,
-the application uses its deterministic spatial parser.
+Colab-first application for multi-layout invoice PDFs. In Accuracy mode, a local
+vision model reads **the original image of every PDF page**, while PaddleOCR
+provides independent text/position evidence. The application returns full
+structured invoice fields, checks table rows and totals, and flags disagreement.
+Fast mode uses only the deterministic spatial parser. No generic model or
+unverified PDF collection guarantees Cloud-level accuracy.
 
 ## Requirements
 
 - Python 3.11+
 - Tesseract OCR installed and available on `PATH`
 - Ollama running locally (optional, used for AI parsing)
-- The Ollama model configured by `OLLAMA_MODEL` (Colab accuracy default: `qwen2.5:7b`)
+- A vision-capable Ollama model (Colab accuracy default: `qwen3-vl:4b`)
 
 ## Setup
 
@@ -27,7 +29,7 @@ orientation language data.
 Optional environment variables:
 
 - `OLLAMA_URL` (default: `http://127.0.0.1:11434/api/chat`)
-- `OLLAMA_MODEL` (default: `qwen2.5:3b`)
+- `OLLAMA_MODEL` (default for image-first requests: `qwen3-vl:4b`)
 - `OCRMYPDF_EXE` (explicit OCRmyPDF executable path)
 - `OCR_PYTHON_EXE` (Python executable used for coordinate OCR)
 
@@ -41,22 +43,21 @@ Open <http://127.0.0.1:8765> and upload a PDF invoice.
 
 ## Google Colab
 
-[Open the setup notebook in Colab](https://colab.research.google.com/github/ubaid-148/OCR/blob/main/colab_setup.ipynb), select **Runtime > Change runtime type > T4 GPU**, then **Runtime > Run all**. For a private repository, add a Colab secret named `GITHUB_TOKEN` with read access and enable notebook access; public repositories need no token. The notebook installs GPU Paddle on GPU runtimes and CPU Paddle otherwise, and verifies the installation in a fresh process. A GPU installation failure stops setup instead of silently running OCR on CPU. Local AI is enabled by default for unfamiliar layouts; Balanced mode skips it when spatial parsing passes validation. Fast mode explicitly skips AI and can miss fields on unfamiliar layouts.
+[Open the setup notebook in Colab](https://colab.research.google.com/github/ubaid-148/OCR/blob/main/colab_setup.ipynb), select **Runtime > Change runtime type > T4 GPU**, then **Runtime > Run all**. The public repository needs no token. The notebook installs Paddle in an isolated environment and pulls Qwen3-VL 4B into Ollama. Accuracy mode reads every original PDF page even when spatial OCR appears complete; Fast skips vision. The first setup downloads models. A T4 may still be slower than a cloud service, and this release needs a Colab accuracy/latency benchmark before any production claim.
 
 ## Private multi-layout training
 
-The repository includes a two-notebook, source-verified training workflow for a folder of unrelated invoice layouts. Use [colab_dataset.ipynb](https://colab.research.google.com/github/ubaid-148/OCR/blob/main/colab_dataset.ipynb) to create resumable OCR drafts, review every value against private Drive page images, and export supplier/layout-isolated splits. Then use [colab_train.ipynb](https://colab.research.google.com/github/ubaid-148/OCR/blob/main/colab_train.ipynb) in a fresh GPU runtime for Qwen3-VL 2B LoRA training and held-out gates. See [TRAINING.md](TRAINING.md).
+The repository includes a separate two-notebook training workflow for unrelated invoice layouts. Use [colab_dataset.ipynb](https://colab.research.google.com/github/ubaid-148/OCR/blob/main/colab_dataset.ipynb) to create OCR drafts, then **manually verify every field against the page** before export. [colab_train.ipynb](https://colab.research.google.com/github/ubaid-148/OCR/blob/main/colab_train.ipynb) trains a Qwen3-VL 2B LoRA experiment from those verified labels. See [TRAINING.md](TRAINING.md). The current Colab inference model is the stock Qwen3-VL 4B, **not** that adapter; uploading PDFs alone did not train or deploy a model.
 
 The 111 PDFs in `public_invoice_pdfs/` were explicitly authorized by the user for public distribution. Corrected labels, rendered pages, predictions, and adapters remain ignored and must not be committed. OCR/cloud output is only a draft: export defaults to at least 80 explicitly verified documents. A trained adapter is rejected if it regresses on held-out critical fields, invalid JSON, exact-document accuracy, or unsupported-value behavior. Passing a private test set is not a 100% guarantee for unseen formats, so evidence validation and `needs_review` remain required.
 
 ## Flow
 
-Explicit supplier/customer VAT labels, colon-prefixed identifiers and shared
-subtotal/VAT rows are supported. Missing quantity glyphs trigger padded numeric
-retries; a serial number in another column cannot suppress a recovered quantity.
-Clean JSON also includes date of supply, customer-section-scoped address, item
-units, bank details, business description and amount-in-words when found. Handwriting and signature
-verification are not implemented; recovered Arabic names may still need spelling review.
+The image-first output keeps seller/customer names and addresses separate; invoice
+and supply dates, payment, handwritten notes, item code/quantity/price/tax/total,
+VAT summary, printed totals and other labelled fields are exposed when visible.
+Absent or uncertain fields remain null. Handwriting and signatures are not
+independently verified; Arabic spelling may still need human review.
 
 Faint tables retain partial rows when quantity is unreadable. Explicit alphabetic
 item-code columns are supported. Total excluding VAT and total including VAT are
@@ -64,15 +65,15 @@ mapped separately; nearby dates and VAT identifiers cannot become invoice number
 Selected faint English table crops use 400 DPI with contrast and stroke thickening.
 This does not guarantee recovery: uncertain fields remain null and require review.
 
-Uploads default to Accuracy (OCR, validation, and AI review when needed). Fast explicitly skips AI;
-Colab allows 180 seconds and up to 3072 generated tokens for the accuracy review. The page shows
+Uploads default to Accuracy (full-page vision plus OCR, validation and review). Fast explicitly skips AI;
+Colab allows a 180-second socket timeout **per page** and up to 4096 generated tokens per page. The page shows
 the current OCR stage and elapsed time and displays formatted JSON without navigation.
 Concurrent uploads receive HTTP 429 instead of accumulating in the native OCR queue.
 Colab loads Arabic and English OCR models during server startup, so model download
 time is visible in setup rather than hidden in the first upload. This moves cold
 startup cost; it does not remove it. GPU acceleration still requires CUDA Paddle.
 
-The default **Invoice JSON** output contains `status`, invoice `data`, short
+The default **Invoice JSON** output contains `status`, complete supported invoice `data`, short
 `review_notes`, `ocr_device`, and stage-level `timings_seconds`. It omits raw OCR,
 coordinates, confidence evidence, and internal validation details. Missing values
 remain null and uncertain results retain `needs_review`. Item `amount` is pre-tax;
@@ -93,7 +94,7 @@ crops when rows are missing or a detected row loses/collides with a printed colu
 Missing totals and source arithmetic discrepancies no longer trigger a costly
 whole-table retry; they use focused footer crops and remain flagged for review.
 Header fields can be recovered independently of table detection. Responses carry
-`pipeline_version: 2026-09-ruled-grid-v9` to identify this flow.
+`pipeline_version: 2026-09-image-first-v10` to identify this flow.
 Typed candidates below 85% confidence are not promoted; raw alternatives remain in the
 OCR output. Set `OCR_TARGETED_RETRY=false` to disable retries. Both recognition
 models are cached after first use. Retry failures preserve the base OCR and flag
@@ -104,8 +105,8 @@ Items additionally expose `vat_amount`, `discount`, `gross_amount`,
 only when quantity/price and the printed VAT/gross reconcile, and is marked
 `derived_quantity_price`. Printed values are retained. A line/document VAT
 rounding discrepancy triggers review. Field confidence uses selected evidence
-instead of unrelated footer noise. Balanced mode skips AI for receipt-bearing
-invoices whose financial checks pass, since AI cannot uncover hidden headers.
+instead of unrelated footer noise. A receipt can cover source fields, so such
+invoices stay in review even when visible financial columns reconcile.
 
 Tests and QA do not establish 100% accuracy. Names/descriptions recovered by
 targeted OCR still require spelling review. The three real sample PDFs and their
@@ -118,12 +119,14 @@ from cell 1 after an update; an existing running server retains its old imports.
    uncropped pages without images and with sufficient readable text can bypass OCR.
    Image-bearing, rotated, sparse or invalid-text pages use PaddleOCR at 200 DPI.
 3. Paddle models load only when a page needs OCR, and remain cached across uploads.
-4. The hybrid parser compares spatial candidates using completeness, calculations
-   and evidence. Legacy geometry only receives page one; unresolved later pages
-   require review. Layout output receives numeric evidence and confidence checks.
-5. Balanced mode asks Ollama when review is needed; Fast mode returns the spatial
-   result with review information. Arithmetic passing is called `checks_passed`,
-   not proof that every field matches the original document.
+4. The spatial parser builds a fallback from positioned OCR boxes. Accuracy mode
+   separately renders **each original page** into memory and sends that image to
+   Ollama's vision model; pages are merged without dropping later-page items.
+5. Vision output is checked against line arithmetic, totals, OCR identifiers and
+   item-code order. OCR misses do not silently erase an image reading: they flag
+   review. A swapped/shorter table, or a result weaker than a validated spatial
+   result, retains the spatial fallback. Detailed JSON includes rejected vision
+   output for inspection. Passing checks is not proof of source correctness.
 6. JSON includes `schema_version`, `status`, and per-page `extraction_methods`.
    Existing `data`, `quality`, timings and review OCR remain available. Upload and
    processing failures return JSON with an error code and message.
@@ -137,9 +140,8 @@ logos also conservatively use OCR. No source-PDF accuracy or Colab latency claim
 has been measured for this change. Continuation pages without table headers still
 need AI/manual review; automatic header propagation and AI chunking are pending.
 
-Run all regressions with `python -m unittest discover -v`; the native PDF fixture
-test requires pypdfium2. Local validation passed 28 tests including a generated
-PDF with real PDFium extraction and rotated-page fallback.
+Run static/mocked regressions with `python -m unittest discover -p 'test_*.py' -q`.
+These do not run the Colab OCR or vision model and do not establish invoice accuracy.
 
 ## Processing speed
 
@@ -168,12 +170,12 @@ serialized because the native predictor and PDFium resources are shared.
 Run the server with the Python environment containing PaddleOCR. If you set
 `OCR_PYTHON_EXE`, the legacy subprocess path is used and models reload per upload.
 
-Accuracy mode skips Ollama when spatial parsing passes its checks, and also when
-all required fields are present but the printed source arithmetic still requires
-review. Fast mode skips AI entirely; unfamiliar layouts may need more manual
-review. Neither mode lowers the 200 DPI rendering resolution.
+Accuracy mode always sends original page images to Ollama, including when spatial
+parsing appears complete, because layout checks alone cannot verify full names or
+addresses. Fast mode skips AI entirely; unfamiliar layouts may need more manual
+review. Both modes keep the 200 DPI base OCR resolution.
 `USE_LOCAL_AI=false` disables AI globally. `OLLAMA_TIMEOUT_SECONDS` defaults to
-60 seconds (HTTP socket timeout, not an overall job deadline). Ollama is asked
+180 seconds for image-first requests (HTTP socket timeout per page, not an overall job deadline). Ollama is asked
 to keep its model loaded for 30 minutes.
 
 JSON output includes `timings_seconds` for base render/OCR, targeted retries,
@@ -199,13 +201,10 @@ letters. Quantities may be fractional. Full alphanumeric invoice IDs and slash-
 or hyphen-separated dates are retained. Header aliases describe field meanings;
 the output JSON keys remain consistent across suppliers.
 
-The hybrid parser uses this result when it detects rows without dropping rows
-found by the legacy parser, then checks required fields and arithmetic. Unknown
-layouts and incomplete results still go to Ollama in Balanced mode. A compact
-`[x,y,width,height,text]` representation retains every OCR box for AI parsing.
-This reduces prompt size, but does not guarantee that Ollama finishes within
-its configured timeout. Zero tax and explicitly supplied non-15% rates are
-supported by hybrid validation; an absent rate is not assumed to be 15%.
+The hybrid spatial parser retains this result as a fallback. Accuracy mode reads
+original-page images and uses OCR boxes as independent evidence, rather than
+using boxes as its only AI input. Zero tax and explicitly supplied non-15%
+rates are supported; an absent rate is not assumed to be 15%.
 
 Limitations: unusual or merged table headers, wrapped item rows, mixed tax rates,
 and OCR spelling errors can still require review. Passing arithmetic checks is
@@ -217,18 +216,17 @@ Run parser regression checks with `python -m unittest test_invoice_parsing test_
 The parser retains rows with a missing price or amount and attaches nearby
 wrapped description lines, so incomplete rows remain visible for review.
 Missing supplier/customer names and item descriptions also trigger review.
-AI-generated identifiers, dates and numeric values are checked against OCR;
-unsupported values become null and receive an evidence issue. Supported AI
-fields include their OCR page, text and confidence. Presence in OCR alone does
-not prove the correct role or column was chosen. Names and descriptions are not
-covered by this occurrence check. AI results with fewer rows or a worse
-validation/completeness score do not replace the spatial result.
+Image-generated identifiers, dates and numeric values are compared with OCR.
+An OCR miss creates a review issue but does not erase a value read from the
+original image. Item-code row-order reversals are rejected. Presence in OCR
+alone does not prove the correct role or column. Names and descriptions are
+not verified by arithmetic, so they still need human review.
 
 Colab now preloads Ollama during cell 3 and displays `ollama ps` to show GPU/CPU
-placement. Chat requests use an explicit 8192-token context, configurable with
+placement. Image chat requests use an explicit 16384-token context, configurable with
 `OLLAMA_NUM_CTX`. Preloading follows the [Ollama API guidance](https://docs.ollama.com/faq#how-can-i-preload-a-model-into-ollama-to-get-faster-response-times).
 Truncated AI responses are rejected. Setup loading has a 180-second socket
-timeout; invoice requests retain the 60-second socket timeout. These changes
+timeout; invoice image requests use a 180-second socket timeout per page. These changes
 have local regression coverage, not a measured accuracy percentage across a
 production invoice dataset or a live Colab/Ollama benchmark.
 
