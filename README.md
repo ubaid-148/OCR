@@ -43,36 +43,17 @@ Open <http://127.0.0.1:8765> and upload a PDF invoice.
 
 ## Google Colab
 
-### Notebook extraction and safety comparison
+[Open the invoice notebook](https://colab.research.google.com/github/ubaid-148/OCR/blob/main/colab_setup.ipynb), choose **Runtime → Change runtime type → T4 GPU**, then **Runtime → Run all**.
+Upload one PDF when prompted. Its final invoice JSON is displayed and downloaded automatically.
 
-Cell 1 defaults to `PROJECT_REF=codex/invoice-safety-colab` so this review notebook tests the updated branch. Use a fresh runtime if an existing clone is on another branch.
+The notebook has three steps: load project, prepare OCR, and upload/get result.
+It runs PaddleOCR followed by rules-based invoice extraction and validation.
+Missing or uncertain fields remain flagged for review. There are no comparison,
+benchmark, raw-evidence display, or optional model setup cells in this flow.
+The web application's optional full-page vision flow is separate.
 
-The checked-in notebook currently runs **raw PaddleOCR**, followed by structured
-invoice extraction in cell 7. This differs from the web application's full-page
-vision flow described below. Optional Ollama setup is disabled by default; enable
-it and `USE_AI_DRAFT` to add a text-evidence AI draft. No full-page image is sent
-to that text model. Raw boxes and clean invoice JSON are saved separately.
-
-Cell 8 runs identical synthetic safety cases against the previous published
-revision and updated extraction modules, then runs the regression suite. It saves
-`benchmark_outputs/safety-before-after.json` and `regression-tests.log`. The
-comparison isolates `main.py`, `validator.py`, and `llm_extractor.py` with shared
-dependencies; it is **not an end-to-end historical pipeline benchmark**.
-
-The new guards preserve review reasons, compare identifiers without dropping
-leading zeroes, reject malformed/truncated AI output, and require unique matching
-item identities before filling missing table cells. Unmatched AI rows remain
-excluded with a review warning. Non-finite arithmetic operands require review.
-These improve failure handling, not recognition accuracy. Run locally with:
-
-```sh
-python tools/reliability_benchmark.py --baseline-ref 02fd201 --output benchmark_outputs/safety-before-after.json
-```
-
-No live Colab run or dataset-wide accuracy gain has been measured for these
-changes. The existing PDFs are not a verified answer set.
-
-[Open the setup notebook in Colab](https://colab.research.google.com/github/ubaid-148/OCR/blob/codex/invoice-safety-colab/colab_setup.ipynb), select **Runtime > Change runtime type > T4 GPU**, reconnect, then run the cells in order. The public repository needs no token. The notebook checks for an attached GPU before installing packages and installs Paddle in an isolated environment. The optional Ollama cell uses `qwen2.5:14b-instruct` for text evidence; availability and latency depend on runtime resources. The web application's `qwen3-vl:4b` vision flow is separate from this notebook.
+Cell 1 uses `PROJECT_REF=main`. Reopen this updated notebook;
+if your existing runtime has a clone of another branch, use a fresh runtime.
 
 ## No training workflow
 

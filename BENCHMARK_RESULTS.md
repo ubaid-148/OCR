@@ -35,11 +35,7 @@ accuracy or inference speed has been established.**
 
 ## Reproduce
 
-In the supplied Colab notebook, run setup and upload for real PaddleOCR, cell 7
-for structured invoice extraction, and cell 8 for the safety comparison and full
-regression suite. Optional AI extraction requires the Ollama setup cell first.
-Cell 8 writes `benchmark_outputs/safety-before-after.json` (including source
-hashes and failed-case tracebacks) and `benchmark_outputs/regression-tests.log`.
+The Colab notebook now only prepares OCR and returns the uploaded invoice result. Developer safety checks remain available through the command below; they are not part of the notebook flow.
 
 Locally, from the repository root with dependencies available:
 
