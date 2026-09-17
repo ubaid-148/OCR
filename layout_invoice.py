@@ -449,7 +449,8 @@ def parse_layout(pages,filename,language):
             m=re.search(r'(?:[:#]\s*|\b)([A-Za-z]+[-/][A-Za-z0-9/-]*\d[A-Za-z0-9/-]*|\d{3,})\s*$',normalize(w['text']))
             value=near(w,lambda s:bool(re.fullmatch(r'[A-Za-z0-9/-]*\d[A-Za-z0-9/-]*',normalize(s).lstrip(':# '))) and number_string(s,{15}) is None and not re.fullmatch(r'\d{1,4}[-/]\d{1,2}[-/]\d{2,4}',normalize(s)))
             if m: inv=keep('invoice.invoice_number',w,m[1]);break
-            if value: inv=keep('invoice.invoice_number',value,normalize(value['text']).lstrip(':# '));break
+            if value and (value.get('source') == 'native_text' or float(value.get('confidence') or 0) >= 80):
+                inv=keep('invoice.invoice_number',value,normalize(value['text']).lstrip(':# '));break
     pattern=r'\b(?:\d{1,2}[-/]\d{1,2}[-/]20\d{2}|20\d{2}[-/]\d{1,2}[-/]\d{1,2})\b'
     for w in words:
         if w.get('retry_kind')=='date':

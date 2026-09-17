@@ -13,6 +13,9 @@ from table_extractor import extract_table
 from validator import validate
 from canonical_schema import to_canonical
 from llm_extractor import extract_with_ollama
+from bbox_grouping import box_geometry
+from layout_invoice import parse_layout
+from local_ai_parser import parse_invoice_hybrid
 
 
 CANONICAL_KEYS = ("document_type", "invoice_number", "invoice_serial", "invoice_date", "date_of_supply",
@@ -32,6 +35,45 @@ def _field(pairings: dict[str, dict[str, Any]], name: str) -> Any:
 
 def build_document(payload: Any, pdf_path: str | None = None) -> dict[str, Any]:
     boxes = _boxes(payload)
+    # Use the same page-local table/field parser as the PDF result flow. The
+    # generic nearest-label path used to turn footer text into invoice items.
+    source_pages = {page.get("page", i + 1): page for i, page in
+                    enumerate(payload.get("pages", []))} if isinstance(payload, dict) else {}
+    pages_by_number = {page: [] for page in source_pages}
+    for box in boxes:
+        left, top, width, height = box_geometry(box)
+        page = box.get("page", 1)
+        pages_by_number.setdefault(page, []).append(dict(
+            box, left=left, top=top, width=width, height=height))
+    pages = [dict(source_pages.get(page, {}), page=page, words=words)
+             for page, words in sorted(pages_by_number.items())]
+    language = payload.get("language", "eng+ara") if isinstance(payload, dict) else "eng+ara"
+    filename = Path(pdf_path).name if pdf_path else "invoice.pdf"
+    if parse_layout(pages, filename, language) is not None:
+        parsed = parse_invoice_hybrid(pages, filename, language, mode="fast")
+        data, quality = parsed["data"], parsed["quality"]
+        invoice = data.get("invoice", {})
+        document = dict(data,
+            invoice_number=invoice.get("invoice_number"),
+            invoice_date=invoice.get("date"),
+            date_of_supply=invoice.get("date_of_supply"),
+            payment_method=invoice.get("payment_method"),
+            currency=data.get("totals", {}).get("currency"),
+            customer=dict(data.get("customer", {}),
+                          name_ar=data.get("customer", {}).get("name") or None),
+            totals=dict(data.get("totals", {}),
+                        total_vat_rate_percent=data.get("totals", {}).get("vat_rate")),
+            page_info={"page": 1, "total_pages": len(pages)})
+        warnings = list(quality.get("review_reasons", []))
+        warnings.extend("needs_review: low OCR confidence in " + entry["field"]
+                        for entry in quality.get("low_confidence_fields", []))
+        warnings.extend("needs_review: " + str(issue)
+                        for issue in quality.get("evidence_issues", []))
+        warnings.extend("needs_review: OCR retry failed: " + str(error)
+                        for error in quality.get("targeted_ocr_errors", []))
+        document["validation"] = {"needs_review": quality.get("needs_review", True),
+                                  "warnings": warnings}
+        return to_canonical(document)
     pairings = pair_labels(boxes)
     items, table_meta = extract_table(boxes)
     fields = ("name_ar", "name_en", "tax_number", "commercial_registration", "building_no", "street", "district", "postal_code", "additional_no", "short_address", "city", "country")

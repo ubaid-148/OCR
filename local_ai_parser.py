@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+import re
 from typing import Any
 
 from invoice_formatter import parse_invoice
@@ -181,6 +182,22 @@ def parse_invoice_hybrid(pages, source_filename, language, mode='auto'):
             item.setdefault(key,None)
         item.setdefault('field_evidence',{})
     quality=result['quality']
+    # A printed serial and a handwritten reference may share the same header
+    # row. Keep the selected value, but expose the competing source readings.
+    identifiers=set()
+    for page in pages:
+        for retry in page.get('targeted_ocr',{}).get('alternatives',[]):
+            if retry.get('kind') != 'invoice_identifier':
+                continue
+            for word in retry.get('words',[]):
+                value=str(word.get('text','')).strip(' .:#')
+                if float(word.get('confidence') or 0)>=85 and re.fullmatch(r'\d{3,14}',value):
+                    identifiers.add(value)
+    if len(identifiers)>1:
+        quality.update(needs_review=True,overall_status='needs_review')
+        quality.setdefault('review_reasons',[]).append(
+            'Multiple invoice identifiers were read: '+', '.join(sorted(identifiers))+
+            '. Verify the printed invoice number against handwritten references.')
     if receipts:
         quality.update(needs_review=True,overall_status='needs_review',receipt_regions=receipts)
         quality.setdefault('review_reasons',[]).append('Payment receipt detected; its text is excluded. Missing header fields may be covered and require the unobstructed invoice.')

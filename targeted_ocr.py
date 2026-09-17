@@ -71,7 +71,9 @@ def plan_regions(page):
     if bad_customer:
         customer_anchor=next((w for w in words if contains(w['text'],CUSTOMER_SECTION_LABELS) and
                               not contains(w['text'],('customer code','cus code','customer no','vat','tax','كود العميل','رقم العميل','الضريبي'))),None)
-        if customer_anchor:add_row(customer_anchor,'customer_name_ar','ar')
+        if customer_anchor:
+            add_row(customer_anchor,'customer_name_ar','ar')
+            candidates[-1].update(dpi=400, enhance=True)
     if parsed and not parsed['invoice'].get('payment_method'):
         payment_anchor=next((w for w in words if contains(w['text'],('payment method','payment mthd','payment methd','payment type','طريقة الدفع','نوع الدفع'))),None)
         if payment_anchor:
@@ -101,8 +103,12 @@ def plan_regions(page):
                 candidates[-1].update(dpi=400,enhance=True)
             elif contains(text,('vat','tax code','رقم ضريبة','رقم ضريبه','الرقم الضريبي')) and not re.search(r'(?<!\d)\d{15}(?!\d)',text) and not re.search(r'%|amount|without|including',text,re.I):
                 add_row(w,'vat_identifier','en')
+                candidates[-1]['bbox'][1] -= h
+                candidates[-1].update(dpi=400, enhance=True)
             elif any(t in text for t in ('ضربي','الضري','الضرب')) and not re.search(r'\d{15}',text):
                 add_row(w,'vat_identifier','en')
+                candidates[-1]['bbox'][1] -= h
+                candidates[-1].update(dpi=400, enhance=True)
             elif contains(text,DATE_LABELS) and not contains(text,('supply date','date of supply','تاريخ التوريد')) and not re.search(r'\d{4}',text):
                 add_row(w,'date','en')
                 candidates[-1].update(dpi=400,enhance=True)
@@ -138,8 +144,12 @@ def plan_regions(page):
                 _,ry,_,rh=row_evidence['bbox']
                 original=dict(left=heading['left'],top=ry,width=heading['width'],height=rh,text='')
                 add(original,'numeric_cell')
-                candidates[-1]['bbox']=[heading['left']-h,ry-h*.7,heading['left']+heading['width']+h,ry+rh+h*.7]
+                # Padding by a whole glyph height crossed narrow Qty columns
+                # and included the adjacent price. Keep the retry inside the
+                # heading width and below the table rule.
+                candidates[-1]['bbox']=[heading['left']-h*.1,ry-h*.25,heading['left']+heading['width']+h*.1,ry+rh+h*.25]
                 candidates[-1]['dpi']=400
+                candidates[-1].update(language='en', enhance=True)
         if item.get('quantity') is None:
             heading=next((w for w in words if header_match(w['text'],ALIASES['quantity']) and abs(center(w)[1]-(header or 0))<h*3),None)
             row_evidence=item.get('field_evidence',{}).get('amount') or item.get('field_evidence',{}).get('unit_price')
@@ -163,8 +173,8 @@ def plan_regions(page):
                         add(w,'description','whole')
                         candidates[-1].update(language='en',enhance=True)
     # Prioritize identifiers and numeric cells before optional text improvements.
-    order={'invoice_identifier':0,'vat_identifier':1,'customer_name_ar':2,'payment_method':3,'footer_totals':4,'date':5,
-           'numeric_cell':6,'supplier_name_ar':7,'supplier_name_en':8,'supplier_name':9,'description':10}
+    order={'invoice_identifier':1,'vat_identifier':2,'customer_name_ar':3,'payment_method':6,'footer_totals':4,'date':5,
+           'numeric_cell':0,'supplier_name_ar':7,'supplier_name_en':8,'supplier_name':9,'description':10}
     candidates=sorted(candidates,key=lambda r:(order[r['kind']],r['bbox'][1],r['bbox'][0]))[:10]
     if incomplete_table and hint is not None:
         footer_y=min((center(w)[1] for w in words if center(w)[1]>hint+2*h and
@@ -218,7 +228,7 @@ def grid_cells(pdf_page,region,dpi,page_width,page_height,rotation_degrees=0,
     return [dict(kind='table_cells',bbox=[a+2,y0,b-2,y1],original={},language=region.get('language','ar')) for a,b in zip(edges,edges[1:]) if b-a>15][:16]
 
 
-def retry_regions(pdf_page,page_payload,model,extract_words,temp_root):
+def retry_regions(pdf_page,page_payload,model,extract_words,temp_root,missing_numeric_only=False):
     dpi=page_payload.get('render_dpi',200);scale=300/dpi
     page_width=page_payload.get('canonical_width',pdf_page.get_width()*dpi/72)
     page_height=page_payload.get('canonical_height',pdf_page.get_height()*dpi/72)
@@ -233,6 +243,8 @@ def retry_regions(pdf_page,page_payload,model,extract_words,temp_root):
     retries=[]
     regions=[]
     for region in plan_regions(page_payload):
+        if missing_numeric_only and (region['kind'] != 'numeric_cell' or region['original'].get('text')):
+            continue
         if region['kind']=='table_cells':
             cells=grid_cells(pdf_page,region,dpi,page_width,page_height,rotation_degrees,
                              page_image(300))
@@ -304,7 +316,7 @@ def retry_regions(pdf_page,page_payload,model,extract_words,temp_root):
             cv2.imwrite(str(path),gray)
         else:picture.save(path)
         found=[]
-        predictor=model(region.get('language','ar')) if region['kind'] in {'table_cells','table_cells_en','table_area','table_area_en','footer_totals','supplier_name_ar','supplier_name_en','customer_name_ar','payment_method','description'} else model()
+        predictor=model(region['language']) if region.get('language') else model()
         options={'text_det_thresh':.1,'text_det_box_thresh':.2} if region['kind'] in {'numeric_cell','table_cells','table_cells_en','table_area','table_area_en','footer_totals','date','invoice_identifier'} else {}
         for result in predictor.predict(str(path),**options):
             for word in extract_words(result):
@@ -347,8 +359,8 @@ def merge_retries(page, retries):
                 ids=re.findall(r'\b[A-Za-z]{2,}[-/][A-Za-z0-9/-]*\d[A-Za-z0-9/-]*\b',text)
                 if len(ids)==1:
                     candidates.append(dict(word,text=ids[0],raw_text=text))
-                elif re.fullmatch(r'\d{3,}',text):
-                    candidates.append(word)
+                elif re.fullmatch(r'\d{3,}',text.strip(' .:#')) and len(text.strip(' .:#')) != 15:
+                    candidates.append(dict(word,text=text.strip(' .:#'),raw_text=text))
             elif kind=='numeric_cell' and numeric(text) is not None:
                 original=retry['original']
                 if abs(center(word)[1]-center(original)[1])<=max(original.get('height',20),word.get('height',20))*.75:

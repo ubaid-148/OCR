@@ -12,7 +12,7 @@ def extract_result(payload, filename, language="eng+ara"):
     parsed = parse_invoice_hybrid(payload.get("pages", []), filename, language, mode="fast")
     data, quality = parsed["data"], parsed["quality"]
     def select(source, keys):
-        return {key: source.get(key) for key in keys}
+        return {key: None if source.get(key) == "" else source.get(key) for key in keys}
     notes = []
     missing = quality.get("missing_fields", [])
     if missing:

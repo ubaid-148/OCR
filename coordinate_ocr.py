@@ -108,7 +108,7 @@ def extract_words(result: object) -> list[dict[str, object]]:
 def ocr_model_kwargs(paddle_language: str) -> dict[str, object]:
     """Current production PaddleOCR constructor settings (no sweep overrides)."""
     recognition_model = (
-        "PP-OCRv5_mobile_rec" if paddle_language == "en"
+        "en_PP-OCRv5_mobile_rec" if paddle_language == "en"
         else "arabic_PP-OCRv5_mobile_rec"
     )
     return dict(
@@ -259,6 +259,16 @@ def _extract_pdf(input_path, languages, paddle_language, model, progress=lambda 
                     progress(f'Checking uncertain fields on page {number}')
                     retries=retry_regions(page,page_payload,lambda lang='en':model(lang),extract_words,temp_root)
                     merge_retries(page_payload,retries)
+                    # Recovered prices can reveal rows that did not exist when
+                    # the first retry plan was made. Re-plan numeric cells once.
+                    if any(r['kind'] in {'table_area', 'table_area_en', 'table_cells', 'table_cells_en'} for r in retries):
+                        numeric_retries=retry_regions(page,page_payload,lambda lang='en':model(lang),
+                            extract_words,temp_root,missing_numeric_only=True)
+                        prior=list(page_payload['targeted_ocr']['accepted'])
+                        merge_retries(page_payload,numeric_retries)
+                        page_payload['targeted_ocr']['accepted']=prior+page_payload['targeted_ocr']['accepted']
+                        page_payload['targeted_ocr']['alternatives']=retries+numeric_retries
+                        page_payload['targeted_ocr']['attempted_regions']=len(retries)+len(numeric_retries)
                 except Exception as error:
                     page_payload['targeted_ocr_error']=str(error)[:500]
                 page_payload['targeted_ocr_seconds']=round(perf_counter()-retry_started,3)
