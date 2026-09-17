@@ -1,4 +1,6 @@
 import json
+import io
+from contextlib import redirect_stdout
 import sys
 import tempfile
 import unittest
@@ -59,6 +61,38 @@ class LlmLayerTests(unittest.TestCase):
             output = root / "clean.json"
             output.write_text(json.dumps(result), encoding="utf-8")
             self.assertEqual([output.name], [path.name for path in root.iterdir()])
+
+    def test_clean_schema_allows_evidence_words_in_printed_text_and_reviews(self):
+        result = to_canonical({"seller": {"name_en": "Confidence Trading"},
+                               "items": [{"item_name": "bbox confidence"}],
+                               "validation": {"passed": False, "warnings": ["low OCR confidence"]}})
+        _assert_clean_schema(result)
+        self.assertIn("low OCR confidence", result["validation"]["warnings"])
+
+    def test_clean_schema_still_rejects_nested_evidence_keys(self):
+        for key in ("bbox", "confidence"):
+            for section in ("seller", "items", "validation"):
+                with self.subTest(key=key, section=section):
+                    result = to_canonical({"items": [{"item_id": "A"}]})
+                    if section == "items":
+                        result[section][0][key] = 1
+                    elif section == "validation":
+                        result[section]["field_reviews"] = [{"nested": {key: 1}}]
+                    else:
+                        result[section][key] = 1
+                    with self.assertRaisesRegex(RuntimeError, "Raw OCR evidence leaked"):
+                        _assert_clean_schema(result)
+
+    def test_cli_writes_result_with_low_confidence_review(self):
+        draft = to_canonical({"validation": {"passed": False, "warnings": ["low OCR confidence"]}})
+        with tempfile.TemporaryDirectory() as directory, patch("main.build_document", return_value=draft):
+            source, output = Path(directory) / "raw.json", Path(directory) / "invoice.json"
+            source.write_text('{"pages": []}')
+            with patch.object(sys, "argv", ["main.py", str(source), "--output", str(output), "--no-llm"]), redirect_stdout(io.StringIO()):
+                self.assertEqual(main(), 0)
+            result = json.loads(output.read_text())
+            self.assertFalse(result["validation"]["passed"])
+            self.assertIn("low OCR confidence", result["validation"]["warnings"])
 
     def test_cli_malformed_llm_keeps_clean_schema_and_debug_artifacts(self):
         payload = {"pages": [{"page": 1, "words": []}]}
