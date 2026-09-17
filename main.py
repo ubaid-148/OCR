@@ -154,8 +154,19 @@ def merge_drafts(rule_based: dict[str, Any], llm_draft: dict[str, Any] | None,
 def _assert_clean_schema(result: dict[str, Any]) -> None:
     if tuple(result) != CANONICAL_KEYS:
         raise RuntimeError(f"Final output schema mismatch: expected {CANONICAL_KEYS}, got {tuple(result)}")
-    if any(key in json.dumps(result, ensure_ascii=False) for key in ("bbox", "confidence")):
-        raise RuntimeError("Raw OCR evidence leaked into clean output")
+    def check_keys(value: Any) -> None:
+        # Review messages and printed text may legitimately mention confidence
+        # or bbox. Only actual evidence keys constitute a schema leak.
+        if isinstance(value, dict):
+            for key, child in value.items():
+                if key in {"bbox", "confidence"}:
+                    raise RuntimeError("Raw OCR evidence leaked into clean output")
+                check_keys(child)
+        elif isinstance(value, list):
+            for child in value:
+                check_keys(child)
+
+    check_keys(result)
 
 
 def main() -> int:
