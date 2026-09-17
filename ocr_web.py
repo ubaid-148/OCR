@@ -18,7 +18,10 @@ from urllib.parse import parse_qs
 
 from visual_invoice import parse_invoice_visual
 from pdf_errors import InvalidPDFError
-from invoice_response import clean_invoice_response
+from invoice_response import (
+    SCHEMA_VERSION, clean_invoice_response, error_invoice_response, response_json_bytes,
+)
+from page_rotation import page_orientation
 
 
 ROOT = Path(__file__).resolve().parent
@@ -67,6 +70,8 @@ label {{ display:block; margin-top:20px; font-weight:bold; }}
 input,select,button {{ box-sizing:border-box; width:100%; margin-top:8px; padding:13px; border:1px solid #9dbbb0; border-radius:9px; font:inherit; }}
 button {{ margin-top:24px; background:#17624f; color:white; border:0; cursor:pointer; font-weight:bold; }}
 button:hover {{ background:#0f4b3d; }}
+.advanced {{ margin-top:18px; padding:12px; border:1px solid #d5e1dc; border-radius:9px; }}
+.advanced summary {{ cursor:pointer; font-weight:bold; }}
 .message {{ background:#e4f2ec; padding:12px; border-radius:8px; white-space:pre-wrap; }}
 .hint {{ color:#55736b; font-size:14px; }}
 </style></head><body><main>
@@ -76,10 +81,11 @@ button:hover {{ background:#0f4b3d; }}
 {safe_message}
 <form method="post" enctype="multipart/form-data">
 <label>PDF file<input type="file" name="pdf" accept="application/pdf,.pdf" required></label>
+<details class="advanced"><summary>Advanced options</summary>
 <label>Languages<select name="languages"><option value="eng+ara">English + Arabic</option><option value="eng">English only</option><option value="ara">Arabic only</option><option value="eng+urd">English + Urdu</option></select></label>
 <label>Processing<select name="mode"><option value="auto">Accuracy (original PDF image + OCR cross-check)</option><option value="fast">Fast (spatial OCR + validation only)</option></select></label>
-<label>Output<select name="format"><option value="invoice">Invoice JSON</option><option value="invoice_debug">Detailed invoice JSON (debug)</option><option value="json">Raw OCR JSON (technical boxes)</option></select></label>
 <p class="hint">PaddleOCR uses Arabic recognition for Arabic/Urdu selections; it also handles Latin text and numbers.</p>
+</details>
 <button type="submit">Extract Invoice</button>
 </form><p id="progress" role="status" aria-live="polite"></p><pre id="result" style="white-space:pre-wrap;overflow-wrap:anywhere"></pre>
 <script src="/app.js"></script></main></body></html>""".encode("utf-8")
@@ -87,16 +93,15 @@ button:hover {{ background:#0f4b3d; }}
 
 class Handler(BaseHTTPRequestHandler):
     def send_json(self, payload, status=200):
-        data = json.dumps(payload, ensure_ascii=False, allow_nan=False).encode("utf-8")
+        data = response_json_bytes(payload)
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
 
-    def send_failure(self, message, status):
-        self.send_json({"schema_version": "1.0", "status": "error", "data": None,
-                        "error": {"code": status, "message": message}}, status)
+    def send_failure(self, message, status, partial_payload=None):
+        self.send_json(error_invoice_response(status, message, partial_payload), status)
 
     def send_html(self, body: bytes, status: int = 200) -> None:
         self.send_response(status)
@@ -128,7 +133,11 @@ class Handler(BaseHTTPRequestHandler):
             self.send_failure('Another PDF is processing. Wait for it to finish before uploading again.', 429)
             return
         try:
-            self.process_upload()
+            try:
+                self.process_upload()
+            except Exception as error:
+                self.log_message("Unhandled upload failure: %s", error)
+                self.send_failure("The PDF could not be processed safely.", 500)
         finally:
             UPLOAD_SLOT.release()
 
@@ -139,8 +148,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             length = int(self.headers.get("Content-Length", "0"))
         except ValueError:
-            self.send_json({"schema_version": "1.0", "status": "error", "data": None,
-                            "error": {"code": 400, "message": "Invalid Content-Length"}}, 400)
+            self.send_failure("Invalid Content-Length", 400)
             return
         if length <= 0 or length > MAX_UPLOAD_BYTES:
             self.send_failure("Please upload a PDF smaller than 100 MB.", 413)
@@ -154,7 +162,6 @@ class Handler(BaseHTTPRequestHandler):
         fields = multipart_form_fields(message)
         pdf_part = fields.get("pdf")
         language_part = fields.get("languages")
-        format_part = fields.get("format")
         mode_part = fields.get("mode")
         mode = "auto" if mode_part and mode_part.get_content().strip() == "auto" else "fast"
         if not accuracy_gpu_configured(mode):
@@ -165,9 +172,9 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         languages = (language_part.get_content() if language_part else "eng+ara").strip()
-        output_format = (format_part.get_content() if format_part else "json").strip()
-        if output_format not in {"json", "pdf", "invoice_debug"}:
-            output_format = "invoice"
+        # The browser/API has one public result contract. Debug/raw formats stay
+        # internal so a missing form option can never change the response shape.
+        output_format = "invoice"
         if languages not in {"eng", "ara", "eng+ara", "urd", "eng+urd"}:
             languages = "eng+ara"
         filename = Path(pdf_part.get_filename() or "input.pdf").name
@@ -198,6 +205,7 @@ class Handler(BaseHTTPRequestHandler):
             "--oversample", "300", "--output-type", "pdf", "--force-ocr",
             str(input_path), str(output_path),
         ]
+        partial_payload = None
         try:
             if output_format in {"invoice", "invoice_debug", "json"}:
                 started = perf_counter()
@@ -211,7 +219,8 @@ class Handler(BaseHTTPRequestHandler):
                     )
                     if coordinate_result.returncode != 0 or not coordinate_path.exists():
                         detail = (coordinate_result.stderr or coordinate_result.stdout or "Coordinate OCR failed").strip()
-                        self.send_failure(f"OCR failed:\n{detail}", 500)
+                        self.log_message("%s: coordinate OCR failed: %s", job_id, detail[:2000])
+                        self.send_failure("OCR could not process the uploaded PDF.", 500, partial_payload)
                         return
                     coordinate_payload = json.loads(coordinate_path.read_text(encoding="utf-8"))
                 else:
@@ -224,12 +233,14 @@ class Handler(BaseHTTPRequestHandler):
                     "engine": coordinate_payload["engine"],
                     "pages": coordinate_payload["pages"],
                 }
+                partial_payload = payload
                 if output_format in {"invoice", "invoice_debug"}:
                     progress('Validating invoice' if mode == 'fast' else 'Reading original PDF page images and validating invoice')
                     payload = parse_invoice_visual(
                         input_path, coordinate_payload["pages"], filename, languages,
                         mode=mode, progress=progress
                     )
+                    partial_payload = payload
                     # Preserve the evidence when parsing fails, without another OCR run.
                     if payload.get("quality", {}).get("needs_review"):
                         payload["raw_ocr"] = {"pages": coordinate_payload["pages"]}
@@ -241,16 +252,26 @@ class Handler(BaseHTTPRequestHandler):
                     "total": round(perf_counter() - started, 3),
                 }
                 payload["ocr_device"] = coordinate_payload.get("device", "unknown")
+                payload["page_orientations"] = [page_orientation(page)
+                                                for page in coordinate_payload["pages"]]
+                for orientation in payload["page_orientations"]:
+                    self.log_message("%s: page %s orientation residual=%s candidate=%s confidence=%s status=%s",
+                                     job_id, orientation["page"],
+                                     orientation["rotation_degrees"],
+                                     orientation.get("rotation_candidate_degrees"),
+                                     orientation["rotation_confidence"],
+                                     orientation["rotation_status"])
                 payload["pipeline_version"] = "2026-09-evidence-gated-v12"
-                payload["schema_version"] = "1.0"
+                payload["schema_version"] = SCHEMA_VERSION
                 payload["status"] = payload.get("quality", {}).get("overall_status", "extracted")
                 payload["extraction_methods"] = [p.get("extraction_method", "ocr") for p in coordinate_payload["pages"]]
-                self.send_json(clean_invoice_response(payload) if output_format == "invoice" else payload)
+                self.send_json(clean_invoice_response(payload))
                 return
             result = subprocess.run(command, env=env, capture_output=True, text=True, timeout=1800)
             if result.returncode != 0 or not output_path.exists():
                 detail = (result.stderr or result.stdout or "OCR failed").strip()
-                self.send_failure(f"OCR failed:\n{detail}", 500)
+                self.log_message("%s: searchable PDF conversion failed: %s", job_id, detail[:2000])
+                self.send_failure("OCR could not process the uploaded PDF.", 500, partial_payload)
                 return
             data = output_path.read_bytes()
             self.send_response(200)
@@ -260,12 +281,12 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(data)
         except InvalidPDFError as error:
-            self.send_failure(str(error),400)
+            self.send_failure(str(error), 400, partial_payload)
         except subprocess.TimeoutExpired:
-            self.send_failure("OCR timed out after 30 minutes.", 504)
+            self.send_failure("OCR timed out after 30 minutes.", 504, partial_payload)
         except Exception as error:
             self.log_message("OCR failed: %s", error)
-            self.send_failure(f"OCR failed: {error}", 500)
+            self.send_failure("OCR or invoice extraction failed.", 500, partial_payload)
         finally:
             PROGRESS.pop(progress_id, None)
             for path in (input_path, output_path, coordinate_path):

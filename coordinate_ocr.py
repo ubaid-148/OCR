@@ -14,11 +14,15 @@ os.environ.setdefault("FLAGS_use_mkldnn", "0")
 
 import pypdfium2 as pdfium
 import paddle
-from paddleocr import PaddleOCR
+from paddleocr import DocImgOrientationClassification, PaddleOCR
 from native_pdf import extract_native_words
 from targeted_ocr import retry_regions, merge_retries
 from document_regions import receipt_region
 from pdf_errors import InvalidPDFError
+from page_rotation import (
+    choose_orientation, page_orientation,
+    render_upright_page, rotate_image,
+)
 
 
 LANGUAGE_MAP = {
@@ -29,6 +33,7 @@ LANGUAGE_MAP = {
 # PDFium and Paddle predictors are shared native resources: serialize jobs.
 _OCR_LOCK = threading.Lock()
 _MODELS = {}
+_ORIENTATION_MODEL = None
 
 
 def get_ocr_device() -> str:
@@ -53,6 +58,24 @@ def result_payload(result: object) -> dict[str, object]:
     if not isinstance(data, dict):
         raise RuntimeError("PaddleOCR returned an unsupported result format")
     return data
+
+
+def orientation_result_payload(result: object) -> dict[str, object]:
+    """Normalize the standalone Paddle orientation-classifier response."""
+    return result_payload(result)
+
+
+def orientation_decision(result: object, minimum: float | None = None) -> dict[str, object]:
+    """Return a safe residual correction; uncertain guesses are never applied."""
+    data = orientation_result_payload(result)
+    labels = data.get("label_names") or []
+    scores = data.get("scores") or []
+    try:
+        return choose_orientation(labels[0], scores[0], minimum)
+    except (IndexError, TypeError, ValueError) as error:
+        return dict(rotation_degrees=0, rotation_confidence=None,
+                    rotation_source="paddle_doc_orientation", rotation_status="failed",
+                    rotation_error=f"Invalid orientation result: {error}")
 
 
 def extract_words(result: object) -> list[dict[str, object]]:
@@ -108,6 +131,14 @@ def _get_model(paddle_language: str):
     return ocr
 
 
+def _get_orientation_model():
+    global _ORIENTATION_MODEL
+    if _ORIENTATION_MODEL is None:
+        _ORIENTATION_MODEL = DocImgOrientationClassification(
+            model_name="PP-LCNet_x1_0_doc_ori", device=get_ocr_device())
+    return _ORIENTATION_MODEL
+
+
 def extract_pdf(input_path: Path, languages: str, progress=None) -> dict[str, object]:
     progress = progress or (lambda message: None)
     progress('Waiting for OCR worker')
@@ -116,6 +147,7 @@ def extract_pdf(input_path: Path, languages: str, progress=None) -> dict[str, ob
         acquired = perf_counter()
         paddle_language = LANGUAGE_MAP.get(languages, "ar")
         load_seconds = 0.0
+        orientation_seconds = 0.0
         def model(language=None):
             nonlocal load_seconds
             start = perf_counter()
@@ -124,21 +156,46 @@ def extract_pdf(input_path: Path, languages: str, progress=None) -> dict[str, ob
             result = _get_model(language or paddle_language)
             load_seconds += perf_counter() - start
             return result
-        payload = _extract_pdf(input_path, languages, paddle_language, model, progress)
+        def orient(image_path):
+            nonlocal load_seconds, orientation_seconds
+            load_started = perf_counter()
+            if globals().get("_ORIENTATION_MODEL") is None:
+                progress("Preparing page-orientation model")
+            try:
+                detector = _get_orientation_model()
+            except Exception as error:
+                load_seconds += perf_counter() - load_started
+                return dict(rotation_degrees=0, rotation_confidence=None,
+                            rotation_source="paddle_doc_orientation", rotation_status="failed",
+                            rotation_error=str(error)[:500])
+            load_seconds += perf_counter() - load_started
+            inference_started = perf_counter()
+            try:
+                result = next(iter(detector.predict(str(image_path))))
+                decision = orientation_decision(result)
+            except Exception as error:
+                decision = dict(rotation_degrees=0, rotation_confidence=None,
+                                rotation_source="paddle_doc_orientation", rotation_status="failed",
+                                rotation_error=str(error)[:500])
+            orientation_seconds += perf_counter() - inference_started
+            return decision
+        payload = _extract_pdf(input_path, languages, paddle_language, model, progress, orient)
         payload["device"] = get_ocr_device() if any(p["extraction_method"] == "ocr" for p in payload["pages"]) else "not_used"
         ocr_seconds=perf_counter() - acquired - load_seconds
         targeted_seconds=sum(float(page.get('targeted_ocr_seconds',0) or 0) for page in payload['pages'])
         payload["timings_seconds"] = {
             "queue": round(acquired - started, 3),
             "model_load": round(load_seconds, 3),
-            "base_render_and_ocr": round(max(0,ocr_seconds-targeted_seconds),3),
+            "orientation_detection": round(orientation_seconds, 3),
+            "base_render_and_ocr": round(max(0,ocr_seconds-targeted_seconds-orientation_seconds),3),
             "targeted_ocr": round(targeted_seconds,3),
             "render_and_ocr": round(ocr_seconds, 3),
         }
         return payload
 
 
-def _extract_pdf(input_path, languages, paddle_language, model, progress=lambda message: None):
+def _extract_pdf(input_path, languages, paddle_language, model, progress=lambda message: None,
+                 orient=None):
     pages = []
     render_dpi = 200
     try:
@@ -152,6 +209,7 @@ def _extract_pdf(input_path, languages, paddle_language, model, progress=lambda 
         temp_root = Path(temp_dir)
         for number, page in enumerate(document, start=1):
             progress(f'Reading page {number} of {len(document)}')
+            pdf_rotation = int(page.get_rotation() or 0)
             try:
                 native = extract_native_words(page) if os.environ.get("OCR_FORCE_RASTER", "false").lower() not in {"true", "1"} else []
             except Exception:
@@ -159,16 +217,25 @@ def _extract_pdf(input_path, languages, paddle_language, model, progress=lambda 
             if native:
                 pages.append(dict(page=number, render_dpi=render_dpi,
                                   width=page.get_width(), height=page.get_height(),
+                                  canonical_width=page.get_width()*render_dpi/72,
+                                  canonical_height=page.get_height()*render_dpi/72,
+                                  pdf_rotation_degrees=pdf_rotation, rotation_degrees=0,
+                                  rotation_confidence=None, rotation_source="native_text_matrix",
+                                  rotation_status="upright",
                                   extraction_method="native_text", words=native,
                                   text="\n".join(w["text"] for w in native)))
                 page.close()
                 continue
             image_path = temp_root / f"page-{number}.png"
-            bitmap = page.render(scale=render_dpi / 72)
-            try:
-                bitmap.to_pil().convert("RGB").save(image_path)
-            finally:
-                bitmap.close()
+            raw_image = render_upright_page(page, render_dpi, 0)
+            raw_image.save(image_path)
+            decision = orient(image_path) if orient else dict(
+                rotation_degrees=0, rotation_confidence=None,
+                rotation_source="orientation_unavailable", rotation_status="failed")
+            correction = decision["rotation_degrees"]
+            upright_image = rotate_image(raw_image, correction)
+            upright_image.save(image_path)
+            progress(f"Page {number} orientation: {correction}° ({decision['rotation_status']})")
             words = []
             predictor = model()
             progress(f'Recognizing page {number} of {len(document)}')
@@ -178,10 +245,14 @@ def _extract_pdf(input_path, languages, paddle_language, model, progress=lambda 
                 "page": number, "render_dpi": render_dpi,
                 "extraction_method": "ocr",
                 "width": page.get_width(), "height": page.get_height(),
+                "canonical_width": upright_image.width,
+                "canonical_height": upright_image.height,
+                "pdf_rotation_degrees": pdf_rotation,
+                **decision,
                 "words": words,
                 "text": "\n".join(item["text"] for item in words),
             }
-            page_payload['receipt_region']=receipt_region(words,page.get_width()*render_dpi/72,page.get_height()*render_dpi/72)
+            page_payload['receipt_region']=receipt_region(words,upright_image.width,upright_image.height)
             if os.environ.get('OCR_TARGETED_RETRY','true').lower() not in {'false','0','no'}:
                 retry_started=perf_counter()
                 try:
@@ -197,6 +268,7 @@ def _extract_pdf(input_path, languages, paddle_language, model, progress=lambda 
         "pipeline_version": "2026-09-ruled-grid-v9",
         "engine": f"PDFium native text / PaddleOCR 3 ({paddle_language})",
         "language": languages, "pages": pages,
+        "page_orientations": [page_orientation(page) for page in pages],
     }
 
 

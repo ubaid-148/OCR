@@ -5,6 +5,17 @@ from typing import Any
 
 from bbox_grouping import box_geometry, group_rows
 
+# Proposed calibration defaults for the approved future ranking design.
+# These are NOT empirical results; validate/challenge them against the frozen
+# full-corpus baseline. The existing pair_labels algorithm does not use them yet.
+# Scores use a 0..1 scale; OCR confidence uses percentage points (0..100).
+PAIRING_AMBIGUITY_MARGIN = 0.10
+PAIRING_MIN_OCR_CONFIDENCE = 50.0
+PAIRING_CONFIDENCE_WEIGHT = 0.60
+PAIRING_DISTANCE_WEIGHT = 0.40
+# Within an association class: S = confidence_weight * min(label, value)/100
+# + distance_weight/(1+d), d=(4*vertical_gap+horizontal_gap)/median_text_height.
+# Native text has full recognition reliability, with no fabricated OCR score.
 
 LABELS = {
     "tax_number": ("الرقم الضريبي", "الرقم الضريبى", "vat number", "tax number", "vat no"),

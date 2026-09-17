@@ -4,8 +4,51 @@ import unicodedata
 from contextlib import closing
 
 
+def native_text_rotation(page, tolerance_degrees=8):
+    """Return the dominant text-object angle, or ``None`` when it is unsafe.
+
+    Native extraction is permitted only for text whose baseline is established
+    as upright. Pages with intrinsic PDF rotation stay on the raster route, where
+    PDFium consumes ``/Rotate`` before residual visual orientation is classified.
+    """
+    if page.get_rotation():
+        return None
+    angles = []
+    try:
+        objects = list(page.get_objects())
+    except Exception:
+        return None
+    if any(obj.type == 3 for obj in objects):
+        return None
+    for obj in objects:
+        if obj.type != 1:
+            continue
+        try:
+            points = obj.get_quad_points()
+        except Exception:
+            continue
+        if len(points) < 2:
+            continue
+        dx, dy = points[1][0] - points[0][0], points[1][1] - points[0][1]
+        if math.hypot(dx, dy) <= 0:
+            continue
+        raw = math.degrees(math.atan2(dy, dx)) % 360
+        nearest = min((0, 90, 180, 270), key=lambda value: min(abs(raw-value), 360-abs(raw-value)))
+        distance = min(abs(raw-nearest), 360-abs(raw-nearest))
+        if distance <= tolerance_degrees:
+            angles.append((nearest, math.hypot(dx, dy)))
+    if not angles:
+        return None
+    weights = {angle: sum(weight for candidate, weight in angles if candidate == angle)
+               for angle in (0, 90, 180, 270)}
+    angle = max(weights, key=weights.get)
+    return angle if weights[angle] >= sum(weights.values()) * .8 else None
+
+
 def extract_native_words(page, dpi=200):
-    if page.get_rotation() or any(obj.type == 3 for obj in page.get_objects()):
+    # Do not silently call a /Rotate=0 page upright: text object baselines must
+    # independently agree. Sideways or ambiguous text goes through raster OCR.
+    if native_text_rotation(page) != 0:
         return []
     left, bottom, right, top = page.get_bbox()
     if left or bottom:

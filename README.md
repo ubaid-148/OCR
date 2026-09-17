@@ -43,21 +43,17 @@ Open <http://127.0.0.1:8765> and upload a PDF invoice.
 
 ## Google Colab
 
-[Open the setup notebook in Colab](https://colab.research.google.com/github/ubaid-148/OCR/blob/main/colab_setup.ipynb), select **Runtime > Change runtime type > T4 GPU**, reconnect, then **Runtime > Run all**. The public repository needs no token. The notebook checks for an attached GPU **before installing packages** and stops if none is available; it also requires Ollama's vision model to preload fully on GPU. This prevents the observed CPU run (`117s` OCR plus a `180s` vision timeout) from being mistaken for an accuracy test. The notebook installs Paddle in an isolated environment and pulls Qwen3-VL 4B into Ollama. Accuracy mode reads every original PDF page even when spatial OCR appears complete; Fast skips vision. A T4 may still be slower than a cloud service, and this release needs a Colab accuracy/latency benchmark before any production claim.
+[Open the invoice notebook](https://colab.research.google.com/github/ubaid-148/OCR/blob/main/colab_setup.ipynb), choose **Runtime → Change runtime type → T4 GPU**, then **Runtime → Run all**.
+Upload one PDF when prompted. Its final invoice JSON is displayed and downloaded automatically.
 
-The later notebook cells run an optional raw OCR diagnostic on `9498.pdf`, save
-its text boxes, compare preprocessing variants, and produce an evidence-based
-error-attribution report. That numeric reference is user-supplied, not a
-source-verified training label. A single document does not establish accuracy
-across other layouts.
+The notebook has three steps: load project, prepare OCR, and upload/get result.
+It runs PaddleOCR with focused retries, followed by the spatial invoice parser and validation (`invoice_result.py`). The result contains invoice identity, supplier/customer, real table rows, totals, and short deduplicated review notes. Raw evidence and repeated arithmetic diagnostics are not printed. Unreadable quantities remain null; they are never inferred by dividing totals.
+Missing or uncertain fields remain flagged for review. There are no comparison,
+benchmark, raw-evidence display, or optional model setup cells in this flow.
+The web application's optional full-page vision flow is separate.
 
-The final notebook cell offers a separate Stage 1 OCR parameter sweep. It is
-disabled by default because it performs 12 additional OCR passes. Set
-`RUN_STAGE1_SWEEP=True` and run that cell after Colab setup to compare 200/300/400
-DPI against side limits 960/1600/2400/3200 on page 1. Each pass saves its
-PaddleOCR version, constructor/predict arguments, detector-reported parameters,
-image dimensions, recognition metrics, and latency under `benchmark_outputs/`.
-No production OCR default changes until these results are reviewed.
+Cell 1 uses `PROJECT_REF=main`. Reopen this updated notebook;
+if your existing runtime has a clone of another branch, use a fresh runtime.
 
 ## No training workflow
 
@@ -156,6 +152,15 @@ The native-text heuristic cannot establish semantic correctness. Pages containin
 logos also conservatively use OCR. No source-PDF accuracy or Colab latency claim
 has been measured for this change. Continuation pages without table headers still
 need AI/manual review; automatic header propagation and AI chunking are pending.
+
+Raster pages are classified for residual right-angle orientation after PDFium has
+already consumed the PDF page's intrinsic `/Rotate`. The conservative default
+`OCR_ORIENTATION_MIN_CONFIDENCE=0.90` leaves a lower-confidence page unrotated and
+marks its sourced fields for review; set the variable to a value from `0` to `1`
+only after measuring the relevant invoice set. Per-page angle, confidence, status,
+and `/Rotate` diagnostics are returned in `page_orientations`. Classifier latency is
+reported separately as `timings_seconds.orientation_detection` in both Fast and
+Accuracy mode responses.
 
 Run static/mocked regressions with `python -m unittest discover -p 'test_*.py' -q`.
 These do not run the Colab OCR or vision model and do not establish invoice accuracy.

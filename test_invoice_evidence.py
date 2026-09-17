@@ -31,7 +31,8 @@ class EvidenceTests(unittest.TestCase):
     def test_supported_values_and_date_format_conversion(self):
         data = sample()
         issues, evidence = audit_ai(data, pages())
-        self.assertEqual(issues, [])
+        self.assertTrue(any(issue["field"] == "totals.net_amount" and
+                            "row/column" in issue["reason"] for issue in issues))
         self.assertEqual(evidence["invoice.date"]["text"], "18/05/2026")
         self.assertEqual(data["totals"]["net_amount"],115)
 
@@ -41,15 +42,16 @@ class EvidenceTests(unittest.TestCase):
         data["totals"].update(subtotal=200, vat_amount=30, net_amount=230)
         self.assertFalse(_validate(data)[1]["needs_review"])
         issues,_ = audit_ai(data,pages())
-        self.assertIsNone(data["totals"]["net_amount"])
-        self.assertIsNone(data["items"][0]["amount"])
+        self.assertEqual(data["totals"]["net_amount"], 230)
+        self.assertEqual(data["items"][0]["amount"], 200)
         self.assertTrue(issues)
-        self.assertTrue(_validate(data)[1]["needs_review"])
+        self.assertTrue(all(issue["needs_review"] for issue in issues))
 
     def test_id_substring_is_not_evidence(self):
         data=sample(); data["invoice"]["invoice_number"]="001"
-        audit_ai(data,pages())
-        self.assertIsNone(data["invoice"]["invoice_number"])
+        issues,_=audit_ai(data,pages())
+        self.assertEqual(data["invoice"]["invoice_number"], "001")
+        self.assertTrue(any(issue["field"] == "invoice.invoice_number" for issue in issues))
 
     def test_low_confidence_is_reported(self):
         source=pages(); source[0]["words"][-1]["confidence"]=40
@@ -66,7 +68,7 @@ class EvidenceTests(unittest.TestCase):
             dict(text='Description',top=400,left=100,width=100,height=20,confidence=99),
         ]
         issues,_=audit_ai(data,source)
-        self.assertIsNone(data['customer']['address'])
+        self.assertEqual(data['customer']['address'], 'Omar Street, Building 6595')
         self.assertTrue(any(issue['field']=='customer.address' for issue in issues))
 
     def test_partially_supported_customer_address_is_rejected(self):
@@ -79,7 +81,7 @@ class EvidenceTests(unittest.TestCase):
             dict(text='Description',top=400,left=100,width=100,height=20,confidence=99),
         ]
         issues,_=audit_ai(data,source)
-        self.assertIsNone(data['customer']['address'])
+        self.assertEqual(data['customer']['address'], 'Building 3518, Post Code 623')
         self.assertTrue(any(issue['field']=='customer.address' for issue in issues))
 
     def test_ai_swapped_item_codes_fail_printed_row_order(self):

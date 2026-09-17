@@ -13,14 +13,17 @@ class PerformanceFlowTests(unittest.TestCase):
 
     def test_failed_upload_releases_slot(self):
         handler = object.__new__(Handler)
-        with patch.object(handler, 'process_upload', side_effect=RuntimeError('test')):
-            with self.assertRaises(RuntimeError):
-                handler.do_POST()
+        with patch.object(handler, 'process_upload', side_effect=RuntimeError('test')), \
+             patch.object(handler, 'send_failure') as failure:
+            handler.do_POST()
+        failure.assert_called_once_with('The PDF could not be processed safely.', 500)
         self.assertTrue(UPLOAD_SLOT.acquire(blocking=False))
         UPLOAD_SLOT.release()
 
     def test_accuracy_default_and_progress_ui(self):
         body = page().decode()
         self.assertLess(body.index('value="auto"'), body.index('value="fast"'))
+        self.assertIn('<details class="advanced">', body)
+        self.assertNotIn('<label>Output', body)
         self.assertIn('/app.js', body)
         self.assertIn('aria-live="polite"', body)

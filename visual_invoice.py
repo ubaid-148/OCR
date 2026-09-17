@@ -15,6 +15,7 @@ from invoice_evidence import audit_ai, date_key
 from layout_invoice import geometry, header_hint
 from local_ai_parser import _validate, parse_invoice_hybrid
 from ollama_http import request_json
+from page_rotation import clamp_crop_bbox, page_orientation, render_upright_page, scale_bbox
 
 
 TEXT_FIELDS = {
@@ -161,7 +162,10 @@ def _table_crop(page, ocr_page: dict[str, Any] | None):
                     re.search(r"(?i)subtotal|grand total|total excluding|total including|"
                               r"total before|total amount|الإجمالي|المجموع",
                               str(word.get("text", "")))), default=None)
-    source_height = float(page.get_height()) * coordinate_dpi / 72
+    source_height = float(ocr_page.get("canonical_height") or
+                          float(page.get_height()) * coordinate_dpi / 72)
+    source_width = float(ocr_page.get("canonical_width") or
+                         float(page.get_width()) * coordinate_dpi / 72)
     top = max(0, header_y - 3 * glyph_height)
     bottom = min(source_height, (footer_y + 2 * glyph_height) if footer_y else source_height * .88)
     if bottom - top < 8 * glyph_height:
@@ -169,10 +173,11 @@ def _table_crop(page, ocr_page: dict[str, Any] | None):
     crop_dpi = int(os.environ.get("VISION_TABLE_DPI", "300"))
     if not 200 <= crop_dpi <= 400:
         raise ValueError("VISION_TABLE_DPI must be between 200 and 400")
-    high = page.render(scale=crop_dpi / 72).to_pil().convert("RGB")
-    ratio = crop_dpi / coordinate_dpi
-    crop = high.crop((0, int(top * ratio), high.width,
-                      min(high.height, int(bottom * ratio))))
+    high = render_upright_page(page, crop_dpi, ocr_page.get("rotation_degrees", 0))
+    crop_box = clamp_crop_bbox(scale_bbox((0, top, source_width, bottom),
+                                           coordinate_dpi, crop_dpi),
+                                high.width, high.height)
+    crop = high.crop(crop_box)
     crop.thumbnail((2800, 1800))
     buffer = io.BytesIO()
     crop.save(buffer, "JPEG", quality=90, optimize=True)
@@ -191,15 +196,15 @@ def render_pages(pdf_path: str | Path, ocr_pages: list[dict[str, Any]] | None = 
         for index in range(len(document)):
             page = document.get_page(index)
             try:
-                bitmap = page.render(scale=dpi / 72)
-                image = bitmap.to_pil().convert("RGB")
+                ocr_page = ocr_pages[index] if ocr_pages and index < len(ocr_pages) else {}
+                image = render_upright_page(page, dpi, ocr_page.get("rotation_degrees", 0))
                 # Large engineering drawings are bounded per image, not skipped.
                 image.thumbnail((2400, 3000))
                 buffer = io.BytesIO()
                 image.save(buffer, "JPEG", quality=88, optimize=True)
                 images = [base64.b64encode(buffer.getvalue()).decode("ascii")]
                 try:
-                    crop = _table_crop(page, ocr_pages[index] if ocr_pages and index < len(ocr_pages) else None)
+                    crop = _table_crop(page, ocr_page or None)
                 except (KeyError, ValueError, TypeError, IndexError):
                     crop = None  # Full original page remains available.
                 if crop:
@@ -422,6 +427,23 @@ def _enrich_spatial_header(fallback: dict[str, Any], visual_data: dict[str, Any]
     return added
 
 
+def _orientation_issues(pages: list[dict[str, Any]], evidence: dict[str, Any]) -> list[dict[str, Any]]:
+    issues = []
+    for page in pages:
+        if page.get("rotation_status") not in {"uncertain", "failed"}:
+            continue
+        issue = page_orientation(page)
+        issue["reason"] = (page.get("rotation_error") or
+                           "Page orientation could not be established confidently.")
+        issue["affected_fields"] = sorted(
+            field for field, value in evidence.items()
+            if any(entry.get("page") == page.get("page")
+                   for entry in (value if isinstance(value, list) else [value])
+                   if isinstance(entry, dict)))
+        issues.append(issue)
+    return issues
+
+
 def parse_invoice_visual(pdf_path: str | Path, pages: list[dict[str, Any]],
                          filename: str, language: str, mode: str = "auto",
                          progress: Callable[[str], None] | None = None) -> dict[str, Any]:
@@ -429,6 +451,13 @@ def parse_invoice_visual(pdf_path: str | Path, pages: list[dict[str, Any]],
     # used for image-first mode because its column swaps were unsafe.
     spatial_started = perf_counter()
     fallback = parse_invoice_hybrid(pages, filename, language, mode="fast")
+    orientation_issues = _orientation_issues(
+        pages, fallback.get("quality", {}).get("field_evidence", {}))
+    if orientation_issues:
+        fallback["quality"].update(needs_review=True, overall_status="needs_review",
+                                   orientation_issues=orientation_issues)
+        fallback["quality"].setdefault("review_reasons", []).append(
+            "One or more pages have uncertain orientation; only fields sourced from those pages are implicated.")
     stage_timings = {"spatial_parser": round(perf_counter() - spatial_started, 3)}
     fallback["stage_timings"] = stage_timings
     if mode == "fast" or os.environ.get("USE_LOCAL_AI", "true").lower() in {"false", "0", "no"}:
@@ -468,6 +497,12 @@ def parse_invoice_visual(pdf_path: str | Path, pages: list[dict[str, Any]],
                        local_ai_status="vision_evidence_reviewed", evidence_issues=issues,
                        field_evidence=evidence, review_reasons=conflicts + reconciliation_notes,
                        visual_pages=len(parts))
+        visual_orientation_issues = _orientation_issues(pages, evidence)
+        if visual_orientation_issues:
+            quality.update(needs_review=True, overall_status="needs_review",
+                           orientation_issues=visual_orientation_issues)
+            quality["review_reasons"].append(
+                "One or more pages have uncertain orientation; only fields sourced from those pages are implicated.")
         data["validation"] = validation
         quality.update(needs_review=True, overall_status="needs_review")
         quality["review_reasons"].append(

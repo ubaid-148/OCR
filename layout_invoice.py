@@ -240,6 +240,10 @@ def table(words):
                 choices=[w for w in band if w['text'].strip().casefold()=='item']
             if key=='item_code':
                 choices=[w for w in choices if not contains(w['text'],('tax code','vat code','رمز الضريبة','كود الضريبة'))]
+            if key=='serial':
+                # A customer tax-number label above a bilingual table is not
+                # a serial-number column ("الرقم" is only part of that label).
+                choices=[w for w in choices if normalize(w['text']).casefold().strip(' .:#') in aliases]
             if key=='unit':
                 choices=[w for w in choices if not contains(w['text'],ALIASES['unit_price'])]
             if key=='unit_price':
@@ -333,8 +337,8 @@ def table(words):
             if not desc or (price is None and amount is None):
                 continue
             qty=None if quantity_missing else numeric(anchor['text']);pv=numeric(price['text']) if price else None
-            if quantity_missing and price and price.get('source')=='targeted_ocr':
-                pv=None  # A corrected faint price cannot be reconciled without quantity.
+            # Keep a printed price even when quantity is unreadable. Missing
+            # quantity must trigger review, not erase independent OCR evidence.
             av=numeric(amount['text']) if amount else None
             tv=numeric(tax['text']) if tax else None
             dv=numeric(discount['text']) if discount else None
@@ -439,7 +443,7 @@ def parse_layout(pages,filename,language):
                                             abs(y(w)-y(label))*4+abs(w['left']-label['left']),w['text']),default=None)
     inv=None;date=None;time=None;supply_date=None
     for w in words:
-        if w.get('retry_kind')=='invoice_identifier':
+        if w.get('retry_kind')=='invoice_identifier' and number_string(w['text'],{15}) is None:
             inv=keep('invoice.invoice_number',w,normalize(w['text']));break
         if contains(w['text'],INVOICE_LABELS):
             m=re.search(r'(?:[:#]\s*|\b)([A-Za-z]+[-/][A-Za-z0-9/-]*\d[A-Za-z0-9/-]*|\d{3,})\s*$',normalize(w['text']))

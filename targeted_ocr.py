@@ -1,6 +1,5 @@
 """Bounded region re-OCR with page-coordinate provenance and retained alternatives."""
 import re
-from contextlib import closing
 from pathlib import Path
 from statistics import median
 from invoice_formatter import contains, center, has_arabic, normalize
@@ -10,6 +9,7 @@ from layout_invoice import (
     header_hint, header_match, numeric, parse_layout, table,
     table_retry_reasons,
 )
+from page_rotation import clamp_crop_bbox, render_upright_page, scale_bbox
 
 
 def plan_regions(page):
@@ -19,8 +19,8 @@ def plan_regions(page):
     hint=header_hint(words)
     if header is None:
         header=hint
-    page_width=page.get('width',1)*page.get('render_dpi',200)/72
-    page_height=page.get('height',1)*page.get('render_dpi',200)/72
+    page_width=page.get('canonical_width',page.get('width',1)*page.get('render_dpi',200)/72)
+    page_height=page.get('canonical_height',page.get('height',1)*page.get('render_dpi',200)/72)
     header_limit=header if header is not None else page_height*.5
     candidates=[]
     parsed=parse_layout([page],'','')
@@ -196,15 +196,16 @@ def _table_edges(edges,x0,x1):
     return edges
 
 
-def grid_cells(pdf_page,region,dpi,page_width,page_height):
+def grid_cells(pdf_page,region,dpi,page_width,page_height,rotation_degrees=0,
+               rendered_image=None):
     """Use visible vertical rules to re-read merged headers cell by cell."""
     import cv2
     import numpy as np
     x0,y0,x1,y1=region['bbox'];y0=max(0,y0);y1=min(page_height,y1)
     factor=300/dpi
-    crop=(0,(page_height-y1)*72/dpi,0,y0*72/dpi)
-    with closing(pdf_page.render(scale=300/72,crop=crop)) as bitmap:
-        gray=cv2.cvtColor(np.array(bitmap.to_pil().convert('RGB')),cv2.COLOR_RGB2GRAY)
+    full=rendered_image or render_upright_page(pdf_page,300,rotation_degrees)
+    crop=clamp_crop_bbox(scale_bbox((0,y0,page_width,y1),dpi,300),full.width,full.height)
+    gray=cv2.cvtColor(np.array(full.crop(crop)),cv2.COLOR_RGB2GRAY)
     mask=cv2.adaptiveThreshold(gray,255,cv2.ADAPTIVE_THRESH_GAUSSIAN_C,cv2.THRESH_BINARY_INV,31,10)
     mask=cv2.dilate(mask,cv2.getStructuringElement(cv2.MORPH_RECT,(3,1)))
     vertical=cv2.morphologyEx(mask,cv2.MORPH_OPEN,cv2.getStructuringElement(cv2.MORPH_RECT,(1,max(12,int(gray.shape[0]*.45)))))
@@ -219,14 +220,22 @@ def grid_cells(pdf_page,region,dpi,page_width,page_height):
 
 def retry_regions(pdf_page,page_payload,model,extract_words,temp_root):
     dpi=page_payload.get('render_dpi',200);scale=300/dpi
-    page_width=pdf_page.get_width()*dpi/72;page_height=pdf_page.get_height()*dpi/72
+    page_width=page_payload.get('canonical_width',pdf_page.get_width()*dpi/72)
+    page_height=page_payload.get('canonical_height',pdf_page.get_height()*dpi/72)
+    rotation_degrees=page_payload.get('rotation_degrees',0)
+    rendered={}
+    def page_image(render_dpi):
+        if render_dpi not in rendered:
+            rendered[render_dpi]=render_upright_page(pdf_page,render_dpi,rotation_degrees)
+        return rendered[render_dpi]
     word_heights=sorted(float(w.get('height',20)) for w in page_payload.get('words',[]) if w.get('height',0)>0)
     text_height=word_heights[len(word_heights)//2] if word_heights else 20
     retries=[]
     regions=[]
     for region in plan_regions(page_payload):
         if region['kind']=='table_cells':
-            cells=grid_cells(pdf_page,region,dpi,page_width,page_height)
+            cells=grid_cells(pdf_page,region,dpi,page_width,page_height,rotation_degrees,
+                             page_image(300))
             if len(cells)<4:
                 primary=dict(region,kind='table_area',dpi=400)
                 if region.get('language')!='ar' or region.get('recover_text'):
@@ -281,19 +290,19 @@ def retry_regions(pdf_page,page_payload,model,extract_words,temp_root):
         x0=max(0,x0);y0=max(0,y0);x1=min(page_width,x1);y1=min(page_height,y1)
         if x1<=x0 or y1<=y0:continue
         path=Path(temp_root)/f'retry-{i}.png'
-        crop=(x0*72/dpi,(page_height-y1)*72/dpi,(page_width-x1)*72/dpi,y0*72/dpi)
         retry_dpi=region.get('dpi',400 if region.get('enhance') else 300)
         scale=retry_dpi/dpi
-        with closing(pdf_page.render(scale=retry_dpi/72,crop=crop)) as bitmap:
-            picture=bitmap.to_pil().convert('RGB')
-            if region.get('enhance'):
-                import cv2
-                import numpy as np
-                gray=cv2.cvtColor(np.array(picture),cv2.COLOR_RGB2GRAY)
-                gray=cv2.normalize(gray,None,0,255,cv2.NORM_MINMAX)
-                gray=cv2.erode(gray,np.ones((3,3),np.uint8))
-                cv2.imwrite(str(path),gray)
-            else:picture.save(path)
+        full=page_image(retry_dpi)
+        crop=clamp_crop_bbox(scale_bbox((x0,y0,x1,y1),dpi,retry_dpi),full.width,full.height)
+        picture=full.crop(crop)
+        if region.get('enhance'):
+            import cv2
+            import numpy as np
+            gray=cv2.cvtColor(np.array(picture),cv2.COLOR_RGB2GRAY)
+            gray=cv2.normalize(gray,None,0,255,cv2.NORM_MINMAX)
+            gray=cv2.erode(gray,np.ones((3,3),np.uint8))
+            cv2.imwrite(str(path),gray)
+        else:picture.save(path)
         found=[]
         predictor=model(region.get('language','ar')) if region['kind'] in {'table_cells','table_cells_en','table_area','table_area_en','footer_totals','supplier_name_ar','supplier_name_en','customer_name_ar','payment_method','description'} else model()
         options={'text_det_thresh':.1,'text_det_box_thresh':.2} if region['kind'] in {'numeric_cell','table_cells','table_cells_en','table_area','table_area_en','footer_totals','date','invoice_identifier'} else {}

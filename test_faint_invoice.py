@@ -33,3 +33,30 @@ class FaintInvoiceTests(unittest.TestCase):
         words=fixture()+[box('Supplier Trading',0,0),box('310000000000001',0,30),box('الرقم الضربي للعميل',400,140),box('310000000000002',400,115),box('اسم العميل',600,200),box('Customer Trading Est.',100,200)]
         data=parse_layout([{'words':words}],'test.pdf','eng+ara')
         self.assertEqual(data['customer']['vat_number'],'310000000000002')
+
+    def test_targeted_vat_number_cannot_become_invoice_number(self):
+        vat = dict(box('310000000000099',400,100), retry_kind='invoice_identifier')
+        data = parse_layout([{'words': fixture()+[vat]}], 'test.pdf', 'eng')
+        self.assertIsNone(data['invoice']['invoice_number'])
+
+    def test_targeted_price_is_preserved_when_quantity_is_missing(self):
+        words = fixture()
+        next(w for w in words if w['text']=='12.00')['source']='targeted_ocr'
+        rows,_,_=table(words)
+        self.assertEqual(rows[0]['unit_price'],12)
+        self.assertIsNone(rows[0]['quantity'])
+
+    def test_customer_tax_label_is_not_a_serial_column_and_footer_is_not_an_item(self):
+        def word(text,x,y,width=100):
+            return dict(text=text,left=x,top=y,width=width,height=40,confidence=99)
+        words=[word('الرقم الضربي للعميل',480,370,200)]
+        words += [word(t,x,500) for t,x in [('Item Code',210),('Description',720),
+                   ('Qty',1090),('Unit Price',1200),('VAT',1320),('Total',1430)]]
+        words += [word(t,x,600) for t,x in [('PAINT-A',160),('Paint tin',850),('90.00',1200),('180.00',1430)]]
+        words += [word('Total (Excl) VAT',1200,1500),word('180.00',1430,1500),
+                  word('Brand logo',850,1560),word('Head Office phone 0111234567',720,1800)]
+        rows,_,_=table(words)
+        self.assertEqual(len(rows),1)
+        self.assertEqual(rows[0]['description'],'Paint tin')
+        self.assertEqual(rows[0]['unit_price'],90)
+        self.assertEqual(rows[0]['amount'],180)

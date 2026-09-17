@@ -25,7 +25,7 @@ def date_key(text):
 
 
 def audit_ai(data, pages):
-    """Null unsupported values in place; return review reasons and OCR evidence.
+    """Retain values but flag unsupported/weak evidence for manual review.
 
     Occurrence is necessary but not sufficient: role/column correctness remains
     the parser's responsibility and arithmetic checks still run afterwards.
@@ -41,18 +41,20 @@ def audit_ai(data, pages):
     def check(container, key, path, matches):
         value = container.get(key)
         if value is None:
-            return
+            return False
         if not matches:
-            container[key] = None
-            issues.append({"field": path, "reason": "AI value was not found in the OCR evidence"})
-            return
+            issues.append({"field": path, "reason": "AI value was not found in the OCR evidence",
+                           "needs_review": True})
+            return False
         page, word = max(matches, key=lambda pair: float(pair[1].get("confidence") or 0))
         confidence = word.get("confidence")
         evidence[path] = dict(page=page, text=word.get("text", ""), confidence=confidence,
                               source=word.get("source", "ocr"),
                               bbox=[word.get(k) for k in ("left", "top", "width", "height")])
         if word.get("source") != "native_text" and float(confidence or 0) < 80:
-            issues.append({"field": path, "reason": "Supporting OCR confidence is below 80%", "confidence": confidence})
+            issues.append({"field": path, "reason": "Supporting OCR confidence is below 80%",
+                           "confidence": confidence, "needs_review": True})
+        return True
 
     for section, key in (("supplier", "vat_number"), ("customer", "vat_number"), ("invoice", "invoice_number")):
         container = data[section]
@@ -77,7 +79,8 @@ def audit_ai(data, pages):
         if current[0]!=previous[0]+1:
             continue
         if current[1]==previous[1] and previous[2]>current[2]+max(previous[3],current[3])*.5:
-            issues.append({'field':'items.row_order','reason':'Item codes are assigned to different printed rows'})
+            issues.append({'field':'items.row_order','reason':'Item codes are assigned to different printed rows',
+                           'needs_review':True})
     # A customer address must be supported inside the buyer/customer section.
     # Merely finding its building number elsewhere on the page can silently map
     # the seller address to the customer, which is worse than returning null.
@@ -100,8 +103,8 @@ def audit_ai(data, pages):
             if token_matches:supported.extend(token_matches)
             else:unsupported.append(token)
         if unsupported:
-            data['customer']['address']=None
-            issues.append({'field':'customer.address','reason':'Some address numbers lack evidence in the customer section'})
+            issues.append({'field':'customer.address','reason':'Some address numbers lack evidence in the customer section',
+                           'needs_review':True})
         else:
             page,word=max(supported,key=lambda pair:float(pair[1].get('confidence') or 0))
             evidence['customer.address']=dict(page=page,text=word.get('text',''),confidence=word.get('confidence'),
@@ -124,5 +127,12 @@ def audit_ai(data, pages):
             # _validate runs first and rejects malformed sections/items. Reject
             # booleans and non-numeric strings here instead of coercing them.
             matches = numeric_index.get(Decimal(str(value)), []) if isinstance(value, (int,float)) and not isinstance(value,bool) else []
-            check(container, key, f"{prefix}.{key}", matches)
+            path = f"{prefix}.{key}"
+            if check(container, key, path, matches) and matches:
+                # A matching number anywhere on the page is not proof that it
+                # belongs to this row/column. Layout-selected evidence bypasses
+                # this audit; generic visual-AI occurrence matches stay review-only.
+                issues.append({"field": path,
+                               "reason": "Numeric value occurs in OCR, but its row/column role was not independently verified.",
+                               "needs_review": True})
     return issues, evidence

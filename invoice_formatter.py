@@ -112,7 +112,7 @@ def parse_invoice(pages: list[dict[str, Any]], source_filename: str, language: s
     invoice_word = nearest_value(
         words,
         ("inv no", "invoice no"),
-        lambda text: number_string(text, set(range(4, 11))) is not None,
+        lambda text: number_string(text, {15}) is None and number_string(text, set(range(4, 11))) is not None,
         max_distance=600,
     )
     date_word = nearest_value(
