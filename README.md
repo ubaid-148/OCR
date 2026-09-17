@@ -43,21 +43,36 @@ Open <http://127.0.0.1:8765> and upload a PDF invoice.
 
 ## Google Colab
 
-[Open the setup notebook in Colab](https://colab.research.google.com/github/ubaid-148/OCR/blob/main/colab_setup.ipynb), select **Runtime > Change runtime type > T4 GPU**, reconnect, then **Runtime > Run all**. The public repository needs no token. The notebook checks for an attached GPU **before installing packages** and stops if none is available; it also requires Ollama's vision model to preload fully on GPU. This prevents the observed CPU run (`117s` OCR plus a `180s` vision timeout) from being mistaken for an accuracy test. The notebook installs Paddle in an isolated environment and pulls Qwen3-VL 4B into Ollama. Accuracy mode reads every original PDF page even when spatial OCR appears complete; Fast skips vision. A T4 may still be slower than a cloud service, and this release needs a Colab accuracy/latency benchmark before any production claim.
+### Notebook extraction and safety comparison
 
-The later notebook cells run an optional raw OCR diagnostic on `9498.pdf`, save
-its text boxes, compare preprocessing variants, and produce an evidence-based
-error-attribution report. That numeric reference is user-supplied, not a
-source-verified training label. A single document does not establish accuracy
-across other layouts.
+Cell 1 defaults to `PROJECT_REF=codex/invoice-safety-colab` so this review notebook tests the updated branch. Use a fresh runtime if an existing clone is on another branch.
 
-The final notebook cell offers a separate Stage 1 OCR parameter sweep. It is
-disabled by default because it performs 12 additional OCR passes. Set
-`RUN_STAGE1_SWEEP=True` and run that cell after Colab setup to compare 200/300/400
-DPI against side limits 960/1600/2400/3200 on page 1. Each pass saves its
-PaddleOCR version, constructor/predict arguments, detector-reported parameters,
-image dimensions, recognition metrics, and latency under `benchmark_outputs/`.
-No production OCR default changes until these results are reviewed.
+The checked-in notebook currently runs **raw PaddleOCR**, followed by structured
+invoice extraction in cell 7. This differs from the web application's full-page
+vision flow described below. Optional Ollama setup is disabled by default; enable
+it and `USE_AI_DRAFT` to add a text-evidence AI draft. No full-page image is sent
+to that text model. Raw boxes and clean invoice JSON are saved separately.
+
+Cell 8 runs identical synthetic safety cases against the previous published
+revision and updated extraction modules, then runs the regression suite. It saves
+`benchmark_outputs/safety-before-after.json` and `regression-tests.log`. The
+comparison isolates `main.py`, `validator.py`, and `llm_extractor.py` with shared
+dependencies; it is **not an end-to-end historical pipeline benchmark**.
+
+The new guards preserve review reasons, compare identifiers without dropping
+leading zeroes, reject malformed/truncated AI output, and require unique matching
+item identities before filling missing table cells. Unmatched AI rows remain
+excluded with a review warning. Non-finite arithmetic operands require review.
+These improve failure handling, not recognition accuracy. Run locally with:
+
+```sh
+python tools/reliability_benchmark.py --baseline-ref 02fd201 --output benchmark_outputs/safety-before-after.json
+```
+
+No live Colab run or dataset-wide accuracy gain has been measured for these
+changes. The existing PDFs are not a verified answer set.
+
+[Open the setup notebook in Colab](https://colab.research.google.com/github/ubaid-148/OCR/blob/codex/invoice-safety-colab/colab_setup.ipynb), select **Runtime > Change runtime type > T4 GPU**, reconnect, then run the cells in order. The public repository needs no token. The notebook checks for an attached GPU before installing packages and installs Paddle in an isolated environment. The optional Ollama cell uses `qwen2.5:14b-instruct` for text evidence; availability and latency depend on runtime resources. The web application's `qwen3-vl:4b` vision flow is separate from this notebook.
 
 ## No training workflow
 
