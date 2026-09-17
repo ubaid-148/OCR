@@ -55,6 +55,11 @@ def to_canonical(extracted: dict[str, Any]) -> dict[str, Any]:
     validation_source = source.get("validation", {})
     warnings = list(validation_source.get("warnings", [])) if isinstance(validation_source, dict) else []
     warnings = [item if isinstance(item, str) else str(item) for item in warnings]
+    # The canonical contract exposes passed/warnings, not needs_review. Carry
+    # an explicit upstream review request across that boundary even when all
+    # fields are populated and arithmetic passed.
+    if isinstance(validation_source, dict) and validation_source.get("needs_review"):
+        warnings.append("needs_review: upstream validation requires review")
     template_warning = (source.get("_evidence", {}).get("table", {}).get("warning")
                         if isinstance(source.get("_evidence"), dict) else None)
     if template_warning:

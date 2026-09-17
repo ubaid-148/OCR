@@ -92,9 +92,17 @@ def _set_path(document: dict[str, Any], path: str, value: Any) -> None:
                 cursor = cursor.setdefault(token, {})
 
 
-def _same_value(left: Any, right: Any) -> bool:
+def _same_value(left: Any, right: Any, path: str = "") -> bool:
     if left is None or right is None:
         return left is right
+    # Identifiers are text: leading zeroes and large integer IDs are significant.
+    numeric_fields = {"quantity", "unit_price", "discount", "taxable_amount",
+                      "tax_rate_percent", "tax_amount", "item_subtotal_including_vat",
+                      "total_excluding_vat", "other_charges", "total_vat",
+                      "total_taxable_amount_excluding_vat", "total_vat_rate_percent",
+                      "total_amount_including_vat", "customer_balance", "before_tax", "including_tax"}
+    if path.rsplit(".", 1)[-1] not in numeric_fields:
+        return str(left).strip() == str(right).strip()
     try:
         return abs(float(left) - float(right)) <= 0.01
     except (TypeError, ValueError):
@@ -104,20 +112,42 @@ def _same_value(left: Any, right: Any) -> bool:
 def merge_drafts(rule_based: dict[str, Any], llm_draft: dict[str, Any] | None,
                  warnings: list[str] | None = None) -> dict[str, Any]:
     merged = json.loads(json.dumps(rule_based, ensure_ascii=False))
-    review = list(warnings or [])
+    validation = rule_based.get("validation", {})
+    review = list(validation.get("warnings", [])) + list(warnings or [])
+    if validation.get("needs_review") or validation.get("passed") is False:
+        review.append("needs_review: rule-based validation requires review")
     if llm_draft is None:
+        merged["validation"] = {"passed": not review, "warnings": list(dict.fromkeys(review))}
         return merged
+    # Never join table rows by position alone. Missing, repeated or reordered
+    # anchors make correspondence ambiguous, even if the arithmetic looks valid.
+    rule_items, llm_items = rule_based.get("items", []), llm_draft.get("items", [])
+    def anchors(items, key):
+        return [str(item.get(key)).strip() if item.get(key) is not None else "" for item in items]
+    aligned = False
+    if rule_items and len(rule_items) == len(llm_items):
+        rule_ids, llm_ids = anchors(rule_items, "item_id"), anchors(llm_items, "item_id")
+        if all(rule_ids) and all(llm_ids):
+            aligned = rule_ids == llm_ids and len(set(rule_ids)) == len(rule_ids)
+        elif not any(rule_ids) and not any(llm_ids):
+            names = anchors(rule_items, "item_name")
+            aligned = all(names) and names == anchors(llm_items, "item_name") and len(set(names)) == len(names)
+    if not aligned and (rule_items or llm_items):
+        review.append("needs_review: AI item rows could not be matched uniquely in order; retained rule-based items")
     rule_values, llm_values = _flat_paths(rule_based), _flat_paths(llm_draft)
     for path, llm_value in llm_values.items():
         if path.startswith("validation") or path.startswith("page_info"):
+            continue
+        if path.startswith("items[") and not aligned:
             continue
         rule_value = rule_values.get(path)
         if rule_value is None and llm_value is not None:
             _set_path(merged, path, llm_value)
             review.append(f"filled_by_llm: {path} — not confirmed by rule-based extraction, verify manually")
-        elif rule_value is not None and llm_value is not None and not _same_value(rule_value, llm_value):
+        elif rule_value is not None and llm_value is not None and not _same_value(rule_value, llm_value, path):
             review.append(f"field '{path}' mismatch: rule_based={rule_value!r}, llm={llm_value!r} — using rule_based")
-    merged["validation"] = {"passed": False, "warnings": review}
+    review.append("needs_review: AI draft requires source verification; agreement is not proof of correctness")
+    merged["validation"] = {"passed": False, "warnings": list(dict.fromkeys(review))}
     return merged
 
 
@@ -150,7 +180,10 @@ def main() -> int:
     canonical_warnings = list(result.get("validation", {}).get("warnings", []))
     arithmetic_validation = validate(result)
     result["validation"] = arithmetic_validation
-    result["validation"]["warnings"] = list(dict.fromkeys(canonical_warnings + arithmetic_validation["warnings"]))
+    # Canonical warnings are strings; structured arithmetic reviews remain in
+    # field_reviews. Null operands now reach this path even without a mismatch.
+    arithmetic_warnings = [str(warning) for warning in arithmetic_validation["warnings"]]
+    result["validation"]["warnings"] = list(dict.fromkeys(canonical_warnings + arithmetic_warnings))
     result["validation"]["passed"] = not result["validation"]["warnings"]
     if warnings:
         result["validation"]["warnings"] = list(dict.fromkeys(warnings + result["validation"].get("warnings", [])))

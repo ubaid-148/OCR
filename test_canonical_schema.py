@@ -19,6 +19,45 @@ TOTALS = ["total_excluding_vat", "discount", "other_charges", "total_taxable_amo
 
 
 class CanonicalSchemaTests(unittest.TestCase):
+    def complete_document(self):
+        # Populate every field so missing-value warnings cannot mask review loss.
+        return {
+            "invoice_number": "INV-123", "invoice_serial": "123",
+            "invoice_date": "2026-09-17", "date_of_supply": "2026-09-17",
+            "reference_no": "REF-123", "payment_method": "cash",
+            "seller": dict.fromkeys(SELLER, "printed"),
+            "customer": dict.fromkeys(CUSTOMER, "printed"),
+            "items": [dict.fromkeys(ITEM, "printed")],
+            "totals": dict.fromkeys(TOTALS, "printed"),
+            "vat_summary": dict.fromkeys(("tax_code", "before_tax", "tax_amount", "including_tax"), "printed"),
+            "currency": "SAR", "validation": {"passed": True, "warnings": []},
+        }
+
+    def test_explicit_review_survives_without_other_validation_failures(self):
+        for wrapped in (False, True):
+            with self.subTest(wrapped=wrapped):
+                source = self.complete_document()
+                source["validation"]["needs_review"] = True
+                document = to_canonical({"data": source} if wrapped else source)
+                self.assert_shape(document)
+                self.assertFalse(document["validation"]["passed"])
+                self.assertIn("needs_review: upstream validation requires review",
+                              document["validation"]["warnings"])
+                self.assertEqual(to_canonical(document), document)
+                self.assertEqual(source["validation"]["warnings"], [])
+
+    def test_complete_accepted_document_still_passes(self):
+        source = self.complete_document()
+        source["validation"]["needs_review"] = False
+        self.assertEqual(to_canonical(source)["validation"], {"passed": True, "warnings": []})
+
+    def test_review_preserves_existing_reasons(self):
+        source = self.complete_document()
+        source["validation"].update(needs_review=True, warnings=["Check invoice number"])
+        validation = to_canonical(source)["validation"]
+        self.assertFalse(validation["passed"])
+        self.assertIn("Check invoice number", validation["warnings"])
+
     def assert_shape(self, document):
         self.assertEqual(list(document), TOP_LEVEL)
         self.assertEqual(list(document["seller"]), SELLER)
