@@ -34,6 +34,11 @@ def plan_regions(page):
     incomplete_table=bool(table_issues)
     known_invoice=parsed and parsed['invoice'].get('invoice_number')
     known_invoice_evidence=parsed.get('field_evidence',{}).get('invoice.invoice_number') if parsed else None
+    known_vats=bool(parsed) and all(
+        re.fullmatch(r'\d{15}',parsed[party].get('vat_number') or '') and
+        (parsed.get('field_evidence',{}).get(f'{party}.vat_number',{}).get('source')=='native_text' or
+         float(parsed.get('field_evidence',{}).get(f'{party}.vat_number',{}).get('confidence') or 0)>=85)
+        for party in ('supplier','customer'))
     if known_invoice_evidence and known_invoice_evidence.get('bbox'):
         # Oversized text inside a form field is often a handwritten note. Re-read
         # the row so a smaller printed serial beside either bilingual label can win.
@@ -72,8 +77,18 @@ def plan_regions(page):
         customer_anchor=next((w for w in words if contains(w['text'],CUSTOMER_SECTION_LABELS) and
                               not contains(w['text'],('customer code','cus code','customer no','vat','tax','كود العميل','رقم العميل','الضريبي'))),None)
         if customer_anchor:
-            add_row(customer_anchor,'customer_name_ar','ar')
-            candidates[-1].update(dpi=400, enhance=True)
+            labels=[w for w in words if abs(center(w)[1]-center(customer_anchor)[1])<h*1.5 and
+                    contains(w['text'],CUSTOMER_SECTION_LABELS) and
+                    not contains(w['text'],('vat','tax','الضريبي'))]
+            left=max((w['left']+w['width'] for w in labels if re.search('[A-Za-z]',w['text'])),default=page_width*.42)
+            right=min((w['left'] for w in labels if has_arabic(w['text']) and w['left']>left),default=page_width)
+            if right-left>h*4:
+                candidates.append(dict(kind='customer_name_ar',original=customer_anchor,language='ar',
+                    dpi=400,enhance=True,bbox=[left+h*.15,min(w['top'] for w in labels)-h*.35,
+                                             right-h*.15,max(w['top']+w['height'] for w in labels)+h*.35]))
+            else:
+                add_row(customer_anchor,'customer_name_ar','ar')
+                candidates[-1].update(dpi=400, enhance=True)
     if parsed and not parsed['invoice'].get('payment_method'):
         payment_anchor=next((w for w in words if contains(w['text'],('payment method','payment mthd','payment methd','payment type','طريقة الدفع','نوع الدفع'))),None)
         if payment_anchor:
@@ -94,6 +109,27 @@ def plan_regions(page):
         # Totals may sit on either side after a very tall, mostly empty item grid.
         candidates.append(dict(kind='footer_totals',original={},language='en',dpi=400,enhance=True,
             bbox=[0,max(item_bottom+h*.5,page_height*.5),page_width,page_height]))
+    discount_evidence=parsed.get('field_evidence',{}).get('totals.discount',{}) if parsed else {}
+    if parsed and (totals.get('discount') is None or
+                   discount_evidence.get('source')!='native_text' and float(discount_evidence.get('confidence') or 0)<80):
+        discount_label=next((w for w in words if center(w)[1]>header_limit and
+                             contains(w['text'],('discount','الخصم','خصم'))),None)
+        if discount_label:
+            amount_words=[w for w in words if w is not discount_label and
+                          re.search(r'\d',normalize(w['text'])) and
+                          0<center(w)[0]-center(discount_label)[0]<h*12 and
+                          abs(center(w)[1]-center(discount_label)[1])<h*1.5]
+            amount=min(amount_words,key=lambda w:(abs(center(w)[1]-center(discount_label)[1]),
+                                                 abs(center(w)[0]-center(discount_label)[0])),default=None)
+            if amount:
+                x0,y0=amount['left'],amount['top']
+                bbox=[x0-h*.5,y0-h*.5,x0+amount['width']+h*.5,y0+amount['height']+h*.5]
+            else:
+                bbox=[discount_label['left']+discount_label['width']+h*.2,
+                      discount_label['top']-h*.8,page_width,
+                      discount_label['top']+discount_label['height']+h*.8]
+            candidates.append(dict(kind='footer_discount',original=amount or discount_label,
+                                   language='en',dpi=400,enhance=True,bbox=bbox))
     for w in sorted(words,key=lambda w:(w['top'],w['left'])):
         text=w['text']
         if center(w)[1]<header_limit:
@@ -101,11 +137,11 @@ def plan_regions(page):
                 # Bilingual forms commonly place the value in a separate box to the label's left.
                 add_row(w,'invoice_identifier','en')
                 candidates[-1].update(dpi=400,enhance=True)
-            elif contains(text,('vat','tax code','رقم ضريبة','رقم ضريبه','الرقم الضريبي')) and not re.search(r'(?<!\d)\d{15}(?!\d)',text) and not re.search(r'%|amount|without|including',text,re.I):
+            elif not known_vats and contains(text,('vat','tax code','رقم ضريبة','رقم ضريبه','الرقم الضريبي')) and not re.search(r'(?<!\d)\d{15}(?!\d)',text) and not re.search(r'%|amount|without|including',text,re.I):
                 add_row(w,'vat_identifier','en')
                 candidates[-1]['bbox'][1] -= h
                 candidates[-1].update(dpi=400, enhance=True)
-            elif any(t in text for t in ('ضربي','الضري','الضرب')) and not re.search(r'\d{15}',text):
+            elif not known_vats and any(t in text for t in ('ضربي','الضري','الضرب')) and not re.search(r'\d{15}',text):
                 add_row(w,'vat_identifier','en')
                 candidates[-1]['bbox'][1] -= h
                 candidates[-1].update(dpi=400, enhance=True)
@@ -125,14 +161,14 @@ def plan_regions(page):
     header_words=[w for w in words if header is not None and abs(center(w)[1]-header)<h*3]
     description_heading=min((w for w in header_words if header_match(w['text'],ALIASES['description'])),
                             key=lambda w:abs(center(w)[1]-header),default=None)
-    other_centres=sorted(center(w)[0] for w in header_words if w is not description_heading and
-                         any(header_match(w['text'],ALIASES[key]) for key in ALIASES if key!='description'))
     description_bounds=None
     if description_heading:
         dx=center(description_heading)[0]
-        left=max((x for x in other_centres if x<dx),default=0)
-        right=min((x for x in other_centres if x>dx),default=page_width)
-        description_bounds=((left+dx)/2 if left else 0,(right+dx)/2 if right<page_width else page_width)
+        neighbors=[w for w in header_words if w is not description_heading and
+                   any(header_match(w['text'],ALIASES[key]) for key in ALIASES if key!='description')]
+        left=max((w['left']+w['width'] for w in neighbors if center(w)[0]<dx),default=0)
+        right=min((w['left'] for w in neighbors if center(w)[0]>dx),default=page_width)
+        description_bounds=(left+h*.15,right-h*.15) if right-left>h*4 else None
     for item in rows:
         for missing_key in ('quantity','unit_price','amount'):
             if item.get(missing_key) is not None:
@@ -162,19 +198,19 @@ def plan_regions(page):
                     candidates[-1]['dpi']=400
         for evidence in item.get('field_evidence',{}).get('description',[]):
             text=evidence['text']
-            if (not incomplete_table and has_arabic(text) and not re.search('[A-Za-z]',text) and
-                    len(text)>=8 and not re.search('[A-Za-z]',item.get('description') or '')):
+            if has_arabic(text) and float(evidence.get('confidence') or 0)<80:
                 w=next((w for w in words if [w.get(k) for k in ('left','top','width','height')]==evidence['bbox']),None)
                 if w:
                     if description_bounds:
-                        candidates.append(dict(kind='description',original=w,language='en',enhance=True,
-                            bbox=[description_bounds[0],w['top']-h*.65,description_bounds[1],w['top']+w['height']+h*.65]))
+                        bbox=[description_bounds[0],w['top']-h*.65,description_bounds[1],w['top']+w['height']+h*.65]
                     else:
-                        add(w,'description','whole')
-                        candidates[-1].update(language='en',enhance=True)
+                        bbox=[w['left']-h*1.5,w['top']-h*.65,w['left']+w['width']+h*1.5,w['top']+w['height']+h*.65]
+                    candidates.append(dict(kind='description_ar',original=w,language='ar',dpi=400,
+                                           enhance=True,bbox=bbox))
     # Prioritize identifiers and numeric cells before optional text improvements.
-    order={'invoice_identifier':1,'vat_identifier':2,'customer_name_ar':3,'payment_method':6,'footer_totals':4,'date':5,
-           'numeric_cell':0,'supplier_name_ar':7,'supplier_name_en':8,'supplier_name':9,'description':10}
+    order={'invoice_identifier':1,'vat_identifier':2,'customer_name_ar':3,'footer_discount':4,
+           'description_ar':5,'payment_method':7,'footer_totals':6,'date':6,
+           'numeric_cell':0,'supplier_name_ar':8,'supplier_name_en':9,'supplier_name':10,'description':11}
     candidates=sorted(candidates,key=lambda r:(order[r['kind']],r['bbox'][1],r['bbox'][0]))[:10]
     if incomplete_table and hint is not None:
         footer_y=min((center(w)[1] for w in words if center(w)[1]>hint+2*h and
@@ -317,7 +353,9 @@ def retry_regions(pdf_page,page_payload,model,extract_words,temp_root,missing_nu
         else:picture.save(path)
         found=[]
         predictor=model(region['language']) if region.get('language') else model()
-        options={'text_det_thresh':.1,'text_det_box_thresh':.2} if region['kind'] in {'numeric_cell','table_cells','table_cells_en','table_area','table_area_en','footer_totals','date','invoice_identifier'} else {}
+        options={'text_det_thresh':.1,'text_det_box_thresh':.2} if region['kind'] in {
+            'numeric_cell','table_cells','table_cells_en','table_area','table_area_en',
+            'footer_totals','footer_discount','customer_name_ar','description_ar','date','invoice_identifier'} else {}
         for result in predictor.predict(str(path),**options):
             for word in extract_words(result):
                 word.update(left=word['left']/scale+x0,top=word['top']/scale+y0,
@@ -337,7 +375,22 @@ def retry_regions(pdf_page,page_payload,model,extract_words,temp_root,missing_nu
                 found.append(dict(text=result['rec_text'],confidence=float(result['rec_score'])*100,
                                   left=x0,top=y0,width=x1-x0,height=y1-y0,
                                   polygon=[[x0,y0],[x1,y0],[x1,y1],[x0,y1]],
-                                  source='targeted_ocr',retry_kind=region['kind']))
+                                   source='targeted_ocr',retry_kind=region['kind']))
+        if region['kind'] in {'customer_name_ar','description_ar'} and not any(
+                has_arabic(w['text']) and float(w.get('confidence') or 0)>=80 and
+                len(re.findall(r'[\u0600-\u06ff]',w['text']))>=8 for w in found):
+            # The detector can miss an entire faint dot-matrix line. A direct
+            # recognition pass over the tightly bounded value crop may recover it.
+            import cv2
+            try:
+                for result in predictor.paddlex_pipeline.text_rec_model([cv2.imread(str(path))]):
+                    found.append(dict(text=result['rec_text'],confidence=float(result['rec_score'])*100,
+                                      left=x0,top=y0,width=x1-x0,height=y1-y0,
+                                      polygon=[[x0,y0],[x1,y0],[x1,y1],[x0,y1]],
+                                      source='targeted_ocr',retry_kind=region['kind']))
+            except Exception:
+                # Optional recognizer fallback must not discard the base OCR.
+                pass
         retries.append(dict(kind=region['kind'],bbox=[x0,y0,x1,y1],original=region['original'],words=found))
     return retries
 
@@ -351,7 +404,7 @@ def merge_retries(page, retries):
         kind=retry['kind'];candidates=[]
         for word in retry['words']:
             text=word['text'].strip()
-            confidence_floor=80 if kind in {'supplier_name','supplier_name_ar','supplier_name_en','customer_name_ar','payment_method','description'} else 85
+            confidence_floor=80 if kind in {'supplier_name','supplier_name_ar','supplier_name_en','customer_name_ar','payment_method','description','description_ar'} else 85
             if word.get('confidence',0)<confidence_floor:continue
             if kind=='vat_identifier' and re.search(r'(?<!\d)\d{15}(?!\d)',text):
                 candidates.append(word)
@@ -365,6 +418,8 @@ def merge_retries(page, retries):
                 original=retry['original']
                 if abs(center(word)[1]-center(original)[1])<=max(original.get('height',20),word.get('height',20))*.75:
                     candidates.append(word)
+            elif kind=='footer_discount' and numeric(text) is not None:
+                candidates.append(word)
             elif kind in {'table_cells','table_area'}:
                 candidates.append(word)
             elif kind=='footer_totals' and (numeric(text) is not None or re.search(r'[A-Za-z]{3,}',text)):
@@ -379,13 +434,16 @@ def merge_retries(page, retries):
                 candidates.append(dict(word,text=date,raw_text=text,raw_time=time[0] if time else None))
             elif kind=='description' and (re.search(r'[A-Za-z]{3,}',text) or re.search(r'(?i)\b[A-Z]+\d+|\b\d+[/-]\d+\b',text)):
                 candidates.append(word)
+            elif kind=='description_ar' and len(re.findall(r'[\u0600-\u06ff]',text))>=6 and not contains(text,ALIASES['description']):
+                candidates.append(word)
             elif kind=='supplier_name' and re.search(r'[A-Za-z]{3,}',text) and len(text)>8:
                 candidates.append(word)
             elif kind=='supplier_name_ar' and has_arabic(text) and contains(text,('مؤسسة','مؤسسه','شركة')) and len(text)>12:
                 candidates.append(word)
             elif kind=='supplier_name_en' and re.search(r'[A-Za-z]{3,}',text) and contains(text,('company','trading','est','establishment','co')):
                 candidates.append(word)
-            elif kind=='customer_name_ar' and has_arabic(text) and contains(text,('مؤسسة','مؤسسه','شركة','مقاولات')) and len(text)>12:
+            elif (kind=='customer_name_ar' and len(re.findall(r'[\u0600-\u06ff]',text))>=8 and
+                  len(text.split())>=2 and not contains(text,CUSTOMER_SECTION_LABELS)):
                 candidates.append(word)
             elif kind=='payment_method' and contains(text,('cash','card','credit','mada','span','network')):
                 candidates.append(word)
@@ -396,6 +454,12 @@ def merge_retries(page, retries):
             continue
         if kind=='numeric_cell' and candidates:
             words=[w for w in words if w!=retry['original']]
+        if kind=='description_ar' and candidates:
+            original=retry['original']
+            old_letters=len(re.findall(r'[\u0600-\u06ff]',original.get('text','')))
+            new_letters=sum(len(re.findall(r'[\u0600-\u06ff]',w['text'])) for w in candidates)
+            if original in words and float(original.get('confidence') or 0)<80 and new_letters>=max(6,old_letters*.7):
+                words.remove(original)
         for w in candidates:
             # Do not duplicate a successfully read same-language source phrase.
             if any(w['text'].casefold()==old['text'].casefold() and abs(center(w)[1]-center(old)[1])<old.get('height',20) and abs(center(w)[0]-center(old)[0])<max(w.get('width',1),old.get('width',1))*.5 for old in words):continue

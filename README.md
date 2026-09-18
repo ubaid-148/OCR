@@ -47,6 +47,13 @@ Open <http://127.0.0.1:8765> and upload a PDF invoice.
 Upload one PDF when prompted. Its final invoice JSON is displayed and downloaded automatically.
 
 The notebook has three steps: load project, prepare OCR, and upload/get result.
+Step 1 prints the Git commit being tested. Step 2 checks the Paddle device and
+runs a committed invoice sample through the parser before enabling upload.
+Step 2 reads dependencies from `/content/OCR/requirements.txt`, so it works
+even when Colab's current directory changes after cloning.
+The sample check does not run live OCR; the first PDF upload does. After upload,
+the notebook prints the OCR device, pipeline version, and stage timings above the
+downloaded invoice JSON. Check that the device says `gpu:0` when testing on T4.
 It runs PaddleOCR with focused retries, followed by the spatial invoice parser and validation (`invoice_result.py`). The result contains invoice identity, supplier/customer, real table rows, totals, and short deduplicated review notes. Raw evidence and repeated arithmetic diagnostics are not printed. Unreadable quantities remain null; they are never inferred by dividing totals.
 Missing or uncertain fields remain flagged for review. There are no comparison,
 benchmark, raw-evidence display, or optional model setup cells in this flow.

@@ -94,6 +94,52 @@ class FaintSourceRegressionTests(unittest.TestCase):
         self.assertEqual(canonical['items'][0]['quantity'], 2)
         self.assertEqual(canonical['customer']['tax_number'], '300402905100003')
 
+    def test_faint_printed_zero_discount_needs_matching_arithmetic(self):
+        payload = json.loads(Path(__file__).with_name('tests').joinpath(
+            'fixtures/9480_recovered_ocr.json').read_text(encoding='utf-8'))
+        result = extract_result(payload, '9480.pdf')
+        self.assertEqual(result['totals']['discount'], 0)
+        self.assertTrue(any('totals.discount' in note for note in result['review_notes']))
+        total_word = next(w for w in payload['pages'][0]['words'] if w['text'] == '207.00')
+        total_word['text'] = '208.00'
+        from layout_invoice import parse_layout
+        self.assertIsNone(parse_layout(payload['pages'], '9480.pdf', 'eng+ara')['totals']['discount'])
+
+    def test_faint_name_description_and_discount_get_focused_crops(self):
+        page = json.loads(Path(__file__).with_name('tests').joinpath(
+            'fixtures/9480_recovered_ocr.json').read_text(encoding='utf-8'))['pages'][0]
+        regions = plan_regions(page)
+        by_kind = {region['kind']: region for region in regions}
+        self.assertGreater(by_kind['customer_name_ar']['bbox'][0], 800)
+        self.assertLess(by_kind['customer_name_ar']['bbox'][2], 1500)
+        self.assertEqual(by_kind['description_ar']['language'], 'ar')
+        self.assertLess(by_kind['description_ar']['bbox'][0], 743)
+        self.assertGreater(by_kind['description_ar']['bbox'][2], 1044)
+        self.assertEqual(by_kind['footer_discount']['original']['text'], '(.00')
+        self.assertNotIn('vat_identifier', by_kind)
+
+    def test_confident_focused_arabic_replaces_faint_text_but_keeps_review(self):
+        payload = json.loads(Path(__file__).with_name('tests').joinpath(
+            'fixtures/9480_recovered_ocr.json').read_text(encoding='utf-8'))
+        page = payload['pages'][0]
+        original = next(w for w in page['words'] if w['text'] == 'ا لون اري تركيايه')
+        customer_label = next(w for w in page['words'] if w['text'] == 'اسم العميل')
+        name = 'مؤسسة اختبار للتجارة'
+        description = 'جالون دهان تركي'
+        merge_retries(page, [
+            dict(kind='customer_name_ar', original=customer_label, words=[
+                dict(text=name, confidence=91, left=1030, top=401, width=380, height=47,
+                     source='targeted_ocr', retry_kind='customer_name_ar')]),
+            dict(kind='description_ar', original=original, words=[
+                dict(text=description, confidence=92, left=710, top=595, width=335, height=42,
+                     source='targeted_ocr', retry_kind='description_ar')]),
+        ])
+        result = extract_result(payload, '9480.pdf')
+        self.assertEqual(result['customer']['name'], name)
+        self.assertEqual(result['items'][0]['description'], description)
+        self.assertEqual(result['status'], 'needs_review')
+        self.assertTrue(any('Check names and item descriptions' in note for note in result['review_notes']))
+
 
 if __name__ == '__main__':
     unittest.main()

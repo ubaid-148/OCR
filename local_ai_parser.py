@@ -206,7 +206,8 @@ def parse_invoice_hybrid(pages, source_filename, language, mode='auto'):
     if any(page.get('targeted_ocr_error') for page in pages):
         quality.update(needs_review=True,overall_status='needs_review')
         quality['targeted_ocr_errors']=[page['targeted_ocr_error'] for page in pages if page.get('targeted_ocr_error')]
-    if any(a['kind'] in {'supplier_name','supplier_name_ar','description'} for page in pages for a in page.get('targeted_ocr',{}).get('accepted',[])):
+    if any(a['kind'] in {'supplier_name','supplier_name_ar','customer_name_ar','description','description_ar'}
+           for page in pages for a in page.get('targeted_ocr',{}).get('accepted',[])):
         quality.update(needs_review=True,overall_status='needs_review')
-        quality.setdefault('review_reasons',[]).append('Check supplier/description spelling recovered by targeted OCR against the source.')
+        quality.setdefault('review_reasons',[]).append('Check names and item descriptions recovered by targeted OCR against the PDF.')
     return result

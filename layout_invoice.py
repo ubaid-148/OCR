@@ -571,6 +571,22 @@ def parse_layout(pages,filename,language):
                     continue
                 specificity=max((len(re.findall(r'[^\W_]+',alias)) for alias in aliases if contains(label['text'],(alias,))),default=1)
                 matches.append((specificity,fy(label),label,value,number))
+        if not matches and path == 'totals.discount' and all(value is not None for value in (subtotal, vat, net)):
+            # A faint printed zero can be read as "(.00" or "O.00". Accept that
+            # narrow OCR ambiguity only beside the discount label and only when
+            # the independently printed subtotal, VAT and net reconcile to zero.
+            reconciles = abs(Decimal(str(subtotal)) + Decimal(str(vat)) - Decimal(str(net))) <= Decimal('.02')
+            if reconciles:
+                for label in footer:
+                    if not contains(label['text'], aliases):
+                        continue
+                    zeros = [w for w in footer if w is not label and
+                             re.fullmatch(r'[\(Oo][.,][0Oo]{2}', normalize(w['text']).strip()) and
+                             (w.get('source') == 'native_text' or float(w.get('confidence') or 0) >= 60) and
+                             0 < center(w)[0] - center(label)[0] < fh * 12 and
+                             abs(fy(w) - fy(label)) <= fh * 1.2]
+                    if zeros:
+                        return keep(path, min(zeros, key=lambda w: abs(fy(w) - fy(label))), 0.0)
         if not matches:return None
         _,_,_,value,number=max(matches,key=lambda match:(match[0],match[1]))
         return keep(path,value,number)

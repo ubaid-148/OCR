@@ -41,15 +41,21 @@ not used as the invoice number.
 
 ## Remaining limitations
 
-The result still requires review. Customer name is unreadable to the current
-pipeline; the Arabic item description is low confidence. The printed zero
-discount and currency are not recovered. Per-line VAT and gross fields remain
-null where the source does not provide them. The handwritten date also differs
-from the printed date; the reported date is the printed one.
+The result still requires review. Customer name is unreadable to the measured
+live OCR run; the Arabic item description is low confidence. The printed zero
+discount was missing in that run. A subsequent local replay of the saved OCR
+evidence recovers `0.00` from the ambiguous `(.00` reading only when the printed
+subtotal, VAT, and net reconcile; the low-confidence source stays flagged for
+review. Focused customer-name and Arabic-description retries now use tighter
+crops, but their live Colab output has not yet been measured. Currency remains
+null because it is not printed. Per-line VAT and gross fields remain null where
+the source does not provide them. The handwritten date also differs from the
+printed date; the reported date is the printed one.
 
 ## Validation and outputs
 
 - 164 regression tests pass in the local OCR runtime, with no skips.
+- After the focused replay improvements, 167 local static/regression tests pass.
 - Real before/after OCR evidence is retained in `tests/fixtures/9480_ocr.json`
   and `tests/fixtures/9480_recovered_ocr.json` for regression replay.
 - All 111 cached corpus inputs produce schema-valid, finite canonical JSON
@@ -57,7 +63,5 @@ from the printed date; the reported date is the printed one.
 - Local outputs: `benchmark_outputs/9480-fixed.json`,
   `benchmark_outputs/9480-canonical-fixed.json`, and
   `benchmark_outputs/9480-raw-fixed.json`.
-- Changes are local. GitHub publication remains unavailable because the
-  authenticated account was denied write access to the repository (403).
 
 Run regressions with `python -m unittest discover -p 'test_*.py' -q`.
