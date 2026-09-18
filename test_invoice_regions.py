@@ -1,9 +1,13 @@
 import copy
+import tempfile
 import unittest
+from pathlib import Path
+from unittest.mock import patch
+from PIL import Image
 from document_regions import invoice_words
 from layout_invoice import table, numeric, header_match, parse_layout
 from local_ai_parser import _validate
-from targeted_ocr import _table_edges, merge_retries, plan_regions
+from targeted_ocr import _table_edges, merge_retries, plan_regions, retry_regions
 from test_layout_invoice import box
 from test_invoice_evidence import sample
 
@@ -32,6 +36,89 @@ class InvoiceRegionTests(unittest.TestCase):
         table_plan=next(plan for plan in plans if plan['kind']=='table_cells')
         self.assertTrue(table_plan['recover_headers'])
         self.assertTrue(any('amount' in reason for reason in table_plan['retry_reasons']))
+
+    def test_numeric_row_without_description_triggers_table_retry(self):
+        words=[box(t,x,300) for t,x in [('Description',300),('Qty',650),('Unit Price',850),('Amount',1050)]]
+        words += [box(t,x,360) for t,x in [('Example item',300),('2',650),('10.00',850),('20.00',1050)]]
+        words += [box(t,x,420) for t,x in [('1',650),('5.00',850),('5.00',1050)]]
+        words += [box('Subtotal',300,520),box('25.00',1050,520)]
+        rows,_,_=table(words)
+        self.assertEqual(len(rows),1)
+        plans=plan_regions(dict(words=words,width=500,height=700,render_dpi=200))
+        table_plan=next(plan for plan in plans if plan['kind']=='table_cells')
+        self.assertIn('numeric item row lacks a recovered description',table_plan['retry_reasons'])
+        self.assertTrue(table_plan['recover_text'])
+
+    def test_failed_retry_keeps_other_recovered_fields(self):
+        class PdfPage:
+            def get_width(self): return 72
+            def get_height(self): return 72
+        class Predictor:
+            def predict(self,path,**options):
+                if 'retry-0.' in path:
+                    raise RuntimeError('one crop failed')
+                return [[dict(box('2',20,10),polygon=[[20,10],[100,10],[100,30],[20,30]])]]
+        original=box('',60,80)
+        regions=[dict(kind='date',bbox=[0,0,160,40],original=box('Date',0,0),dpi=200),
+                 dict(kind='numeric_cell',bbox=[40,70,160,110],original=original,dpi=200)]
+        page=dict(words=[original],render_dpi=200,canonical_width=200,canonical_height=200)
+        with tempfile.TemporaryDirectory() as temporary, \
+             patch('targeted_ocr.plan_regions',return_value=regions), \
+             patch('targeted_ocr.render_upright_page',return_value=Image.new('RGB',(200,200),'white')):
+            retries=retry_regions(PdfPage(),page,lambda *args: Predictor(),lambda result: result,Path(temporary))
+        self.assertIn('one crop failed',retries[0]['error'])
+        self.assertEqual(retries[1]['words'][0]['text'],'2')
+        merge_retries(page,retries)
+        self.assertEqual(page['targeted_ocr']['accepted'][0]['text'],'2')
+        self.assertIn('date:',page['targeted_ocr_error'])
+
+    def test_failed_grid_detection_falls_back_to_full_table_crop(self):
+        class PdfPage:
+            def get_width(self): return 72
+            def get_height(self): return 72
+        class Predictor:
+            def predict(self,path,**options): return []
+        region=dict(kind='table_cells',bbox=[0,20,180,140],original={},
+                    language='en',recover_text=True)
+        page=dict(words=[],render_dpi=200,canonical_width=200,canonical_height=200)
+        with tempfile.TemporaryDirectory() as temporary, \
+             patch('targeted_ocr.plan_regions',return_value=[region]), \
+             patch('targeted_ocr.grid_cells',side_effect=RuntimeError('grid failed')), \
+             patch('targeted_ocr.render_upright_page',return_value=Image.new('RGB',(400,400),'white')):
+            retries=retry_regions(PdfPage(),page,lambda *args: Predictor(),lambda result: result,Path(temporary))
+        self.assertEqual(retries[0]['kind'],'table_area')
+        self.assertIn('grid failed',retries[0]['error'])
+
+    def test_faint_arabic_uses_original_crop_when_enhancement_misses(self):
+        class PdfPage:
+            def get_width(self): return 72
+            def get_height(self): return 72
+        recovered=dict(box('جالون دهان تركي',20,10),confidence=92,
+                       polygon=[[20,10],[100,10],[100,30],[20,30]])
+        class Predictor:
+            def predict(self,path,**options):
+                return [[recovered.copy()]] if path.endswith('-plain.png') else []
+        region=dict(kind='description_ar',bbox=[20,20,150,60],original=box('garbled',40,30),
+                    language='ar',dpi=200,enhance=True)
+        page=dict(words=[],render_dpi=200,canonical_width=200,canonical_height=200)
+        with tempfile.TemporaryDirectory() as temporary, \
+             patch('targeted_ocr.plan_regions',return_value=[region]), \
+             patch('targeted_ocr.render_upright_page',return_value=Image.new('RGB',(200,200),'white')):
+            retries=retry_regions(PdfPage(),page,lambda *args: Predictor(),lambda result: result,Path(temporary))
+        self.assertEqual(retries[0]['words'][0]['text'],'جالون دهان تركي')
+        self.assertNotIn('error',retries[0])
+
+    def test_low_confidence_english_description_is_reread(self):
+        words=[box(t,x,300) for t,x in [('Description',300),('Qty',650),('Unit Price',850),('Amount',1050)]]
+        faint=dict(box('Door hlnge',300,360),confidence=58)
+        words += [faint,box('2',650,360),box('10.00',850,360),box('20.00',1050,360)]
+        plans=plan_regions(dict(words=words,width=500,height=700,render_dpi=200))
+        description=next(plan for plan in plans if plan['kind']=='description')
+        self.assertEqual(description['language'],'en')
+        corrected=dict(box('Door hinge',300,360),source='targeted_ocr',retry_kind='description')
+        page=merge_retries(dict(words=words),[dict(kind='description',original=faint,words=[corrected])])
+        self.assertNotIn(faint,page['words'])
+        self.assertIn(corrected,page['words'])
 
     def test_outer_table_rules_are_recovered_without_dropping_last_column(self):
         edges=_table_edges([168,302,412,535,656,780,890,987,1073,1478,1648],0,1654)

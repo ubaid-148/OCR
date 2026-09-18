@@ -54,6 +54,9 @@ even when Colab's current directory changes after cloning.
 The sample check does not run live OCR; the first PDF upload does. After upload,
 the notebook prints the OCR device, pipeline version, and stage timings above the
 downloaded invoice JSON. Check that the device says `gpu:0` when testing on T4.
+Focused retries now reread faint customer names and item descriptions from both
+enhanced and original crops. A numeric item row without a readable description
+triggers a table reread; a failed crop is reported while other retries continue.
 It runs PaddleOCR with focused retries, followed by the spatial invoice parser and validation (`invoice_result.py`). The result contains invoice identity, supplier/customer, real table rows, totals, and short deduplicated review notes. Raw evidence and repeated arithmetic diagnostics are not printed. Unreadable quantities remain null; they are never inferred by dividing totals.
 Missing or uncertain fields remain flagged for review. There are no comparison,
 benchmark, raw-evidence display, or optional model setup cells in this flow.

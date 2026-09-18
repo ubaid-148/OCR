@@ -381,6 +381,10 @@ def table_retry_reasons(words, rows, header_y, h):
     if header_y is None or not rows:
         return ['table rows were not recovered']
     _,row_y=geometry(words)
+    def column_x(word):
+        return float(word.get('grid_center_x',center(word)[0]))
+    def evidence_y(evidence):
+        return row_y(dict(zip(('left','top','width','height'),evidence['bbox'])))
     band=[w for w in words if abs(row_y(w)-header_y)<=h*3]
     reasons=[]
     for key in ('quantity','unit_price','amount'):
@@ -413,6 +417,39 @@ def table_retry_reasons(words, rows, header_y, h):
             if bbox in used:
                 reasons.append(f'row {index+1} reuses one box for {used[bbox]} and {key}')
             used[bbox]=key
+    # A row whose description was missed is absent from ``rows`` altogether.
+    # Look for a second, independently printed Qty/Price/Amount triplet inside
+    # the table before deciding that all item rows were recovered.
+    quantity_header=min((w for w in band if header_match(w['text'],ALIASES['quantity'])),
+                        key=lambda w:abs(row_y(w)-header_y),default=None)
+    price_header=min((w for w in band if header_match(w['text'],ALIASES['unit_price'])),
+                     key=lambda w:abs(row_y(w)-header_y),default=None)
+    amount_header=min((w for w in band if header_match(w['text'],ALIASES['amount']) and
+                       not contains(w['text'],('vat amount','tax amount','total with vat','total including vat'))),
+                      key=lambda w:abs(row_y(w)-header_y),default=None)
+    if quantity_header and price_header and amount_header:
+        columns=[column_x(w) for w in (quantity_header,price_header,amount_header)]
+        if len(set(columns))==3:
+            stop=min((row_y(w) for w in words if row_y(w)>header_y+2*h and
+                      (normalize(w['text']).strip(' :').casefold() in {'total','Ù…Ø¬Ù…ÙˆØ¹'} or
+                       contains(w['text'],('subtotal','grand total','invoice total','total excluding vat',
+                                           'total including vat','taxable total','Ø§Ù„Ø¥Ø¬Ù…Ø§Ù„ÙŠ')))),default=float('inf'))
+            tolerances=[max(h*.75,min(abs(x-other) for other in columns if other!=x)*.58) for x in columns]
+            body=[w for w in words if header_y+h*.6<row_y(w)<stop and numeric(w['text']) is not None]
+            for quantity in body:
+                if abs(column_x(quantity)-columns[0])>tolerances[0]:
+                    continue
+                peers=[any(abs(row_y(w)-row_y(quantity))<h*1.15 and abs(column_x(w)-columns[i])<=tolerances[i]
+                           for w in body if w is not quantity) for i in (1,2)]
+                if not all(peers):
+                    continue
+                recovered=any(any(isinstance(ev,dict) and len(ev.get('bbox',[]))==4 and
+                                  abs(evidence_y(ev)-row_y(quantity))<h*1.15
+                                  for key,ev in item.get('field_evidence',{}).items() if key!='description')
+                              for item in rows)
+                if not recovered:
+                    reasons.append('numeric item row lacks a recovered description')
+                    break
     return list(dict.fromkeys(reasons))
 
 

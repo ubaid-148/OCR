@@ -43,7 +43,10 @@ def plan_regions(page):
         # Oversized text inside a form field is often a handwritten note. Re-read
         # the row so a smaller printed serial beside either bilingual label can win.
         known_invoice=known_invoice and known_invoice_evidence['bbox'][3]<=h*1.8
-    if parsed and not parsed['supplier'].get('name_ar'):
+    supplier_ar_evidence=parsed.get('field_evidence',{}).get('supplier.name_ar',{}) if parsed else {}
+    if parsed and (not parsed['supplier'].get('name_ar') or
+                   supplier_ar_evidence and supplier_ar_evidence.get('source')!='native_text' and
+                   float(supplier_ar_evidence.get('confidence') or 0)<80):
         name_anchor=next((w for w in words if contains(w['text'],('مؤسسة','مؤسسه','شركة')) and center(w)[1]<header_limit*.5),None)
         if name_anchor:
             cluster=[w for w in words if has_arabic(w['text']) and abs(center(w)[1]-center(name_anchor)[1])<h]
@@ -71,8 +74,11 @@ def plan_regions(page):
                       min(page_width,max(w['left']+w['width'] for w in cluster)+h),
                       min(page_height,max(w['top']+w['height'] for w in cluster)+h*4)]))
     customer_value=parsed.get('customer',{}).get('name') if parsed else None
+    customer_evidence=parsed.get('field_evidence',{}).get('customer.name',{}) if parsed else {}
     bad_customer=(not customer_value or contains(customer_value,CUSTOMER_SECTION_LABELS) or
-                  re.search(r'(?i)(?:building|post\s*code|add\s*no|المبنى|الرمز\s*البريدي)\s*\d',customer_value))
+                  re.search(r'(?i)(?:building|post\s*code|add\s*no|المبنى|الرمز\s*البريدي)\s*\d',customer_value) or
+                  customer_evidence and customer_evidence.get('source')!='native_text' and
+                  float(customer_evidence.get('confidence') or 0)<80)
     if bad_customer:
         customer_anchor=next((w for w in words if contains(w['text'],CUSTOMER_SECTION_LABELS) and
                               not contains(w['text'],('customer code','cus code','customer no','vat','tax','كود العميل','رقم العميل','الضريبي'))),None)
@@ -198,20 +204,31 @@ def plan_regions(page):
                     candidates[-1]['dpi']=400
         for evidence in item.get('field_evidence',{}).get('description',[]):
             text=evidence['text']
-            if has_arabic(text) and float(evidence.get('confidence') or 0)<80:
+            if evidence.get('source')!='native_text' and float(evidence.get('confidence') or 0)<80:
                 w=next((w for w in words if [w.get(k) for k in ('left','top','width','height')]==evidence['bbox']),None)
                 if w:
                     if description_bounds:
                         bbox=[description_bounds[0],w['top']-h*.65,description_bounds[1],w['top']+w['height']+h*.65]
                     else:
                         bbox=[w['left']-h*1.5,w['top']-h*.65,w['left']+w['width']+h*1.5,w['top']+w['height']+h*.65]
-                    candidates.append(dict(kind='description_ar',original=w,language='ar',dpi=400,
+                    arabic=has_arabic(text)
+                    candidates.append(dict(kind='description_ar' if arabic else 'description',
+                                           original=w,language='ar' if arabic else 'en',dpi=400,
                                            enhance=True,bbox=bbox))
     # Prioritize identifiers and numeric cells before optional text improvements.
     order={'invoice_identifier':1,'vat_identifier':2,'customer_name_ar':3,'footer_discount':4,
            'description_ar':5,'payment_method':7,'footer_totals':6,'date':6,
            'numeric_cell':0,'supplier_name_ar':8,'supplier_name_en':9,'supplier_name':10,'description':11}
-    candidates=sorted(candidates,key=lambda r:(order[r['kind']],r['bbox'][1],r['bbox'][0]))[:10]
+    candidates=sorted(candidates,key=lambda r:(order[r['kind']],r['bbox'][1],r['bbox'][0]))
+    # Numeric crops take priority, but a busy table must not consume the whole
+    # retry budget before a missing customer or faint item description is read.
+    selected=candidates[:10]
+    for kind in ('customer_name_ar','description_ar','description'):
+        for region in (r for r in candidates if r['kind']==kind and r not in selected):
+            if len(selected)>=14:
+                break
+            selected.append(region)
+    candidates=selected
     if incomplete_table and hint is not None:
         footer_y=min((center(w)[1] for w in words if center(w)[1]>hint+2*h and
                       (normalize(w['text']).strip(' :').casefold() in {'total','مجموع'} or contains(w['text'],(
@@ -221,7 +238,8 @@ def plan_regions(page):
         table_end=footer_y-h*.4 if footer_y is not None else min(page_height*.85,hint+max(12*h,page_height*.25))
         arabic_table=any(has_arabic(w['text']) and hint-3*h<center(w)[1]<table_end for w in words)
         candidates.insert(0,dict(bbox=[0,hint-h,page_width,max(hint+4*h,table_end)],kind='table_cells',original={},
-                                 language='ar' if arabic_table else 'en',recover_text=not rows,
+                                 language='ar' if arabic_table else 'en',
+                                 recover_text=not rows or 'numeric item row lacks a recovered description' in table_issues,
                                  recover_headers=bool(rows),retry_reasons=table_issues))
     return candidates
 
@@ -282,8 +300,13 @@ def retry_regions(pdf_page,page_payload,model,extract_words,temp_root,missing_nu
         if missing_numeric_only and (region['kind'] != 'numeric_cell' or region['original'].get('text')):
             continue
         if region['kind']=='table_cells':
-            cells=grid_cells(pdf_page,region,dpi,page_width,page_height,rotation_degrees,
-                             page_image(300))
+            try:
+                cells=grid_cells(pdf_page,region,dpi,page_width,page_height,rotation_degrees,
+                                 page_image(300))
+            except Exception as error:
+                # A failed grid detector still leaves the full table crop usable.
+                cells=[]
+                region=dict(region,planning_error=f'grid detection: {type(error).__name__}: {str(error)[:180]}')
             if len(cells)<4:
                 primary=dict(region,kind='table_area',dpi=400)
                 if region.get('language')!='ar' or region.get('recover_text'):
@@ -340,47 +363,69 @@ def retry_regions(pdf_page,page_payload,model,extract_words,temp_root,missing_nu
         path=Path(temp_root)/f'retry-{i}.png'
         retry_dpi=region.get('dpi',400 if region.get('enhance') else 300)
         scale=retry_dpi/dpi
-        full=page_image(retry_dpi)
-        crop=clamp_crop_bbox(scale_bbox((x0,y0,x1,y1),dpi,retry_dpi),full.width,full.height)
-        picture=full.crop(crop)
-        if region.get('enhance'):
-            import cv2
-            import numpy as np
-            gray=cv2.cvtColor(np.array(picture),cv2.COLOR_RGB2GRAY)
-            gray=cv2.normalize(gray,None,0,255,cv2.NORM_MINMAX)
-            gray=cv2.erode(gray,np.ones((3,3),np.uint8))
-            cv2.imwrite(str(path),gray)
-        else:picture.save(path)
+        try:
+            full=page_image(retry_dpi)
+            crop=clamp_crop_bbox(scale_bbox((x0,y0,x1,y1),dpi,retry_dpi),full.width,full.height)
+            picture=full.crop(crop)
+            if region.get('enhance'):
+                import cv2
+                import numpy as np
+                gray=cv2.cvtColor(np.array(picture),cv2.COLOR_RGB2GRAY)
+                gray=cv2.normalize(gray,None,0,255,cv2.NORM_MINMAX)
+                gray=cv2.erode(gray,np.ones((3,3),np.uint8))
+                if not cv2.imwrite(str(path),gray):
+                    raise OSError(f'Cannot save OCR crop {path}')
+            else:picture.save(path)
+        except Exception as error:
+            retries.append(dict(kind=region['kind'],bbox=[x0,y0,x1,y1],
+                                original=region['original'],words=[],
+                                error=f'crop preparation: {type(error).__name__}: {str(error)[:180]}'))
+            continue
         found=[]
-        predictor=model(region['language']) if region.get('language') else model()
-        options={'text_det_thresh':.1,'text_det_box_thresh':.2} if region['kind'] in {
-            'numeric_cell','table_cells','table_cells_en','table_area','table_area_en',
-            'footer_totals','footer_discount','customer_name_ar','description_ar','date','invoice_identifier'} else {}
-        for result in predictor.predict(str(path),**options):
+        errors=[region['planning_error']] if region.get('planning_error') else []
+        def add_result(result):
             for word in extract_words(result):
                 word.update(left=word['left']/scale+x0,top=word['top']/scale+y0,
                             width=word['width']/scale,height=word['height']/scale,
                             polygon=[[x/scale+x0,y/scale+y0] for x,y in word['polygon']],
                             source='targeted_ocr',retry_kind=region['kind'])
                 if region['kind'] in {'table_cells','table_cells_en'}:
-                    # Text inside numeric cells may be right/left aligned. Keep
-                    # the ruled cell centre so parsing uses the actual column,
-                    # not the glyph box centre returned by recognition.
+                    # OCR glyph alignment can differ from the ruled cell centre.
                     word.update(grid_column=[x0,x1],grid_center_x=(x0+x1)/2)
                 found.append(word)
-        if region['kind']=='supplier_name_ar' and not any(contains(w['text'],('مؤسسة','مؤسسه','شركة')) and len(w['text'])>12 for w in found):
+        options={'text_det_thresh':.1,'text_det_box_thresh':.2} if region['kind'] in {
+            'numeric_cell','table_cells','table_cells_en','table_area','table_area_en',
+            'footer_totals','footer_discount','customer_name_ar','description_ar','description',
+            'date','invoice_identifier'} else {}
+        predictor=None
+        try:
+            predictor=model(region['language']) if region.get('language') else model()
+            for result in predictor.predict(str(path),**options):
+                add_result(result)
+        except Exception as error:
+            # A failed crop must not erase the successful retries on this page.
+            errors.append(f'enhanced OCR: {type(error).__name__}: {str(error)[:180]}')
+        faint_arabic=region['kind'] in {'customer_name_ar','description_ar'}
+        def strong_arabic():
+            return any(float(w.get('confidence') or 0)>=80 and
+                       len(re.findall(r'[\u0600-\u06ff]',w['text']))>=
+                       (8 if region['kind']=='customer_name_ar' else 6) and
+                       (len(w['text'].split())>=2 and not contains(w['text'],CUSTOMER_SECTION_LABELS)
+                        if region['kind']=='customer_name_ar' else
+                        not contains(w['text'],ALIASES['description']))
+                       for w in found)
+        if faint_arabic and predictor is not None and not strong_arabic():
+            # Dilation of dark pixels can join faint Arabic dots. Retry the
+            # original crop so the recognizer sees both image versions.
+            plain_path=Path(temp_root)/f'retry-{i}-plain.png'
+            try:
+                picture.save(plain_path)
+                for result in predictor.predict(str(plain_path),**options):
+                    add_result(result)
+            except Exception as error:
+                errors.append(f'plain OCR: {type(error).__name__}: {str(error)[:180]}')
+        if predictor is not None and region['kind']=='supplier_name_ar' and not any(contains(w['text'],('مؤسسة','مؤسسه','شركة')) and len(w['text'])>12 for w in found):
             # The Arabic name may be fragmented by detection; read the complete label line.
-            import cv2
-            for result in predictor.paddlex_pipeline.text_rec_model([cv2.imread(str(path))]):
-                found.append(dict(text=result['rec_text'],confidence=float(result['rec_score'])*100,
-                                  left=x0,top=y0,width=x1-x0,height=y1-y0,
-                                  polygon=[[x0,y0],[x1,y0],[x1,y1],[x0,y1]],
-                                   source='targeted_ocr',retry_kind=region['kind']))
-        if region['kind'] in {'customer_name_ar','description_ar'} and not any(
-                has_arabic(w['text']) and float(w.get('confidence') or 0)>=80 and
-                len(re.findall(r'[\u0600-\u06ff]',w['text']))>=8 for w in found):
-            # The detector can miss an entire faint dot-matrix line. A direct
-            # recognition pass over the tightly bounded value crop may recover it.
             import cv2
             try:
                 for result in predictor.paddlex_pipeline.text_rec_model([cv2.imread(str(path))]):
@@ -388,10 +433,25 @@ def retry_regions(pdf_page,page_payload,model,extract_words,temp_root,missing_nu
                                       left=x0,top=y0,width=x1-x0,height=y1-y0,
                                       polygon=[[x0,y0],[x1,y0],[x1,y1],[x0,y1]],
                                       source='targeted_ocr',retry_kind=region['kind']))
-            except Exception:
-                # Optional recognizer fallback must not discard the base OCR.
-                pass
-        retries.append(dict(kind=region['kind'],bbox=[x0,y0,x1,y1],original=region['original'],words=found))
+            except Exception as error:
+                errors.append(f'direct OCR: {type(error).__name__}: {str(error)[:180]}')
+        if faint_arabic and predictor is not None and not strong_arabic():
+            # The detector can miss an entire faint dot-matrix line. A direct
+            # recognition pass over the original value crop may recover it.
+            import cv2
+            try:
+                source_path=plain_path if plain_path.is_file() else path
+                for result in predictor.paddlex_pipeline.text_rec_model([cv2.imread(str(source_path))]):
+                    found.append(dict(text=result['rec_text'],confidence=float(result['rec_score'])*100,
+                                      left=x0,top=y0,width=x1-x0,height=y1-y0,
+                                      polygon=[[x0,y0],[x1,y0],[x1,y1],[x0,y1]],
+                                      source='targeted_ocr',retry_kind=region['kind']))
+            except Exception as error:
+                errors.append(f'direct OCR: {type(error).__name__}: {str(error)[:180]}')
+        retry=dict(kind=region['kind'],bbox=[x0,y0,x1,y1],original=region['original'],words=found)
+        if errors:
+            retry['error']='; '.join(errors)
+        retries.append(retry)
     return retries
 
 
@@ -432,7 +492,8 @@ def merge_retries(page, retries):
                 date=re.search(r'(?:\d{1,2}[-/]\d{1,2}[-/]\d{4}|\d{4}[-/]\d{1,2}[-/]\d{1,2})',text)[0]
                 time=re.search(r'\d{2}:\d{2}:\d{2}',text)
                 candidates.append(dict(word,text=date,raw_text=text,raw_time=time[0] if time else None))
-            elif kind=='description' and (re.search(r'[A-Za-z]{3,}',text) or re.search(r'(?i)\b[A-Z]+\d+|\b\d+[/-]\d+\b',text)):
+            elif kind=='description' and not contains(text,ALIASES['description']) and (
+                    re.search(r'[A-Za-z]{3,}',text) or re.search(r'(?i)\b[A-Z]+\d+|\b\d+[/-]\d+\b',text)):
                 candidates.append(word)
             elif kind=='description_ar' and len(re.findall(r'[\u0600-\u06ff]',text))>=6 and not contains(text,ALIASES['description']):
                 candidates.append(word)
@@ -454,11 +515,12 @@ def merge_retries(page, retries):
             continue
         if kind=='numeric_cell' and candidates:
             words=[w for w in words if w!=retry['original']]
-        if kind=='description_ar' and candidates:
+        if kind in {'description_ar','description'} and candidates:
             original=retry['original']
-            old_letters=len(re.findall(r'[\u0600-\u06ff]',original.get('text','')))
-            new_letters=sum(len(re.findall(r'[\u0600-\u06ff]',w['text'])) for w in candidates)
-            if original in words and float(original.get('confidence') or 0)<80 and new_letters>=max(6,old_letters*.7):
+            alphabet=r'[\u0600-\u06ff]' if kind=='description_ar' else r'[A-Za-z]'
+            old_letters=len(re.findall(alphabet,original.get('text','')))
+            new_letters=sum(len(re.findall(alphabet,w['text'])) for w in candidates)
+            if original in words and float(original.get('confidence') or 0)<80 and new_letters>=max(3,old_letters*.7):
                 words.remove(original)
         for w in candidates:
             # Do not duplicate a successfully read same-language source phrase.
@@ -467,4 +529,8 @@ def merge_retries(page, retries):
     page['words']=words
     page['text']='\n'.join(w['text'] for w in words)
     page['targeted_ocr']={'attempted_regions':len(retries),'accepted':accepted,'alternatives':retries}
+    errors=[f"{retry['kind']}: {retry['error']}" for retry in retries if retry.get('error')]
+    if errors:
+        previous=page.get('targeted_ocr_error')
+        page['targeted_ocr_error']='; '.join(dict.fromkeys(([previous] if previous else [])+errors))[:1000]
     return page
