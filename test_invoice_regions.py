@@ -49,6 +49,36 @@ class InvoiceRegionTests(unittest.TestCase):
         self.assertIn('numeric item row lacks a recovered description',table_plan['retry_reasons'])
         self.assertTrue(table_plan['recover_text'])
 
+    def test_printed_vat_above_recovered_rows_triggers_text_table_retry(self):
+        words=[box(t,x,300) for t,x in [
+            ('Including VAT',20),('VAT Amount',130),('Taxable Amount',390),
+            ('Unit Price',540),('Quantity',650),('Unit',750),
+            ('Description',850),('Item Code',1120)]]
+        rows=[
+            [('58.01',20),('7.57',130),('50.44',390),('50.44',540),
+             ('1',650),('PCS',750),('Oil HELIX 4L',850),('1218',1120)],
+            [('17.01',20),('2.22',130),('14.79',390),('14.79',540),
+             ('1',650),('PCS',750),('Toyota filter D4',850),('5007',1120)],
+        ]
+        for index,row in enumerate(rows):
+            words.extend(box(text,x,360+index*45) for text,x in row)
+        words += [box('Total Vat',300,550),box('14.22',20,550)]
+        plans=plan_regions(dict(words=words,width=500,height=700,render_dpi=200))
+        table_plan=next(plan for plan in plans if plan['kind']=='table_cells')
+        self.assertIn('printed VAT exceeds recovered item rows',table_plan['retry_reasons'])
+        self.assertTrue(table_plan['recover_text'])
+
+    def test_customer_retry_includes_value_area_left_of_combined_label(self):
+        words=[box(t,x,300) for t,x in [
+            ('Description',300),('Qty',650),('Unit Price',850),('Amount',1050)]]
+        words += [box(t,x,360) for t,x in [
+            ('Example item',300),('1',650),('5.00',850),('5.00',1050)]]
+        label=box('Customer / العميل',1050,100)
+        words += [label,box('الشارعالثالث عشر',700,150)]
+        plans=plan_regions(dict(words=words,width=500,height=700,render_dpi=200))
+        name_crops=[plan for plan in plans if plan['kind']=='customer_name_ar']
+        self.assertTrue(any(crop['bbox'][2]<label['left'] for crop in name_crops))
+
     def test_failed_retry_keeps_other_recovered_fields(self):
         class PdfPage:
             def get_width(self): return 72
@@ -179,6 +209,26 @@ class InvoiceRegionTests(unittest.TestCase):
         corrected=dict(box('40.00',100,100),confidence=30,retry_kind='numeric_cell')
         page=merge_retries(dict(words=[original]),[dict(kind='numeric_cell',original=original,words=[corrected])])
         self.assertEqual(page['words'],[original])
+        self.assertEqual(page['targeted_ocr']['accepted'],[])
+
+    def test_faint_printed_serial_and_footer_values_can_be_promoted(self):
+        serial=dict(box('2690111862',300,100),confidence=76)
+        total=dict(box('94.81',100,500),confidence=72)
+        label=dict(box('Total Excluding VAT',300,500),confidence=72)
+        page=merge_retries(dict(words=[]),[
+            dict(kind='invoice_identifier',original=box('Invoice Serial',500,100),
+                 words=[serial]),
+            dict(kind='footer_totals',original={},words=[label,total]),
+        ])
+        accepted={(item['kind'],item['text']) for item in page['targeted_ocr']['accepted']}
+        self.assertIn(('invoice_identifier','2690111862'),accepted)
+        self.assertIn(('footer_totals','94.81'),accepted)
+
+    def test_customer_retry_rejects_joined_street_label(self):
+        street=dict(box('الشارعالثالث عشر',300,100),confidence=95)
+        page=merge_retries(dict(words=[]),[
+            dict(kind='customer_name_ar',original=box('Customer',700,100),words=[street])
+        ])
         self.assertEqual(page['targeted_ocr']['accepted'],[])
 
     def test_identifier_retry_keeps_raw_text_and_exact_id(self):

@@ -83,6 +83,64 @@ def header_match(text,aliases):
     return contains(separated,aliases)
 
 
+def address_label(text):
+    """Recognize address labels, including Arabic labels joined to their value."""
+    aliases=tuple(alias for _,names,_ in ADDRESS_FIELDS for alias in names
+                  if alias not in {'building','bldg','مبنى','حي','شارع'})
+    return contains(text,aliases) or bool(re.search(
+        r'(?:^|[\s/:])(?:الشارع|الحي|المدينة|الدولة|المبنى|الرمز\s*البريدي)',text)) or bool(
+        re.match(r'(?i)^building\s*(?:$|[/：:]|\d)',text.strip()))
+
+
+def customer_name_end(words, buyer, h, row_y, end_y):
+    """The first address row bounds the name, even if its value has no label."""
+    return min((row_y(w)-h*.6 for w in words
+                if row_y(w)>row_y(buyer)+h*.8 and address_label(w['text'])),
+               default=end_y)
+
+
+def vat_summary_values(words):
+    """Read one printed VAT-summary row by column; never sum partial tax bands."""
+    h,y=geometry(words)
+    titles=[w for w in words if contains(w['text'],
+            ('vat summary','tax summary','ملخص ضريبة القيمة المضافة'))]
+    aliases={
+        'subtotal':('before tax','قبل الضريبة'),
+        'vat_amount':('tax amount','vat amount','مبلغ الضريبة'),
+        'net_amount':('inc tax','including tax','including vat','شامل الضريبة'),
+    }
+    summary_headers=[]
+    for title in sorted(titles,key=y):
+        band=[w for w in words if y(title)+h*.3<y(w)<y(title)+h*6]
+        headers={key:max((w for w in band if contains(w['text'],names)),
+                         key=y,default=None) for key,names in aliases.items()}
+        if not all(headers.values()):continue
+        headings=list(headers.values())
+        xs=sorted(center(w)[0] for w in headings)
+        if min(b-a for a,b in zip(xs,xs[1:]))<h*2:continue
+        if max(y(w) for w in headings)-min(y(w) for w in headings)>h*2:continue
+        summary_headers.extend(w for w in band if any(
+            contains(w['text'],names) for names in aliases.values()))
+        bottom=max(y(w) for w in headings)
+        columns={}
+        for key,heading in headers.items():
+            x=center(heading)[0]
+            tolerance=min(abs(x-other) for other in xs if other!=x)*.48
+            columns[key]=[w for w in words if bottom+h*.5<y(w)<bottom+h*4
+                          and abs(center(w)[0]-x)<tolerance and numeric(w['text']) is not None]
+        rows=[]
+        for anchor in columns['subtotal']:
+            row={key:min((w for w in pool if abs(y(w)-y(anchor))<h*.8),
+                         key=lambda w:abs(y(w)-y(anchor)),default=None)
+                 for key,pool in columns.items()}
+            if all(row.values()):rows.append(row)
+        # Multiple tax bands need a separately printed total; choosing the first
+        # would silently discard the other bands. Leave that case to totals OCR.
+        if len(rows)==1 and all(len(pool)==1 for pool in columns.values()):
+            return rows[0],summary_headers
+    return {},summary_headers
+
+
 def row_is_plausible(quantity, unit_price, amount, vat_amount, gross_amount):
     """Reject only clearly impossible row assignments.
 
@@ -266,7 +324,7 @@ def table(words):
                 hx.pop(key)
         header_y=max(y(headers[k]) for k in ('description','quantity','unit_price','amount'))
         stop=min((y(w) for w in words if y(w)>header_y+2*h and (normalize(w['text']).strip(' :').casefold() in {'total','مجموع'} or contains(w['text'],
-                 ('subtotal','grand total','gross amount','total amount','total excluding vat',
+                 ('subtotal','grand total','gross amount','total amount','total excluding vat','vat summary','tax summary',
                   'taxable total','total vat','total (excl) vat','الإجمالي بدون الضريبة','amount chargeable','declaration','الإفصاح','إجمالي الفاتورة')))),default=float('inf'))
         body=[w for w in words if header_y+h*.6<y(w)<stop]
         def tolerance(key):
@@ -479,9 +537,17 @@ def parse_layout(pages,filename,language):
         return min(candidates,key=lambda w:(float(w.get('height',h))>h*1.8,abs(y(w)-y(label))>h*.95,
                                             abs(y(w)-y(label))*4+abs(w['left']-label['left']),w['text']),default=None)
     inv=None;date=None;time=None;supply_date=None
+    # A label can sort before its recovered value (especially on skewed pages).
+    # Select the accepted printed crop before considering base-OCR handwriting.
+    recovered_ids=[w for w in words if w.get('retry_kind')=='invoice_identifier' and
+                   number_string(w['text'],{15}) is None and
+                   not re.fullmatch(r'\d{1,4}[-/]\d{1,2}[-/]\d{2,4}',normalize(w['text']))]
+    if recovered_ids:
+        chosen=min(recovered_ids,key=lambda w:(float(w.get('height',h))>h*1.8,
+                                               -float(w.get('confidence') or 0),y(w)))
+        inv=keep('invoice.invoice_number',chosen,normalize(chosen['text']))
     for w in words:
-        if w.get('retry_kind')=='invoice_identifier' and number_string(w['text'],{15}) is None:
-            inv=keep('invoice.invoice_number',w,normalize(w['text']));break
+        if inv is not None:break
         if contains(w['text'],INVOICE_LABELS):
             m=re.search(r'(?:[:#]\s*|\b)([A-Za-z]+[-/][A-Za-z0-9/-]*\d[A-Za-z0-9/-]*|\d{3,})\s*$',normalize(w['text']))
             value=near(w,lambda s:bool(re.fullmatch(r'[A-Za-z0-9/-]*\d[A-Za-z0-9/-]*',normalize(s).lstrip(':# '))) and number_string(s,{15}) is None and not re.fullmatch(r'\d{1,4}[-/]\d{1,2}[-/]\d{2,4}',normalize(s)))
@@ -524,21 +590,25 @@ def parse_layout(pages,filename,language):
         normalized=normalize(s).strip(' :')
         label_only=normalized.casefold().replace('.',' ').strip() in {'customer','customer name','cust name','custname','buyer','buyer name'}
         joined_address=bool(re.search(r'(?i)(?:building|post\s*code|add(?:itional)?\s*no|short\s*adrs|المبنى|الرمز\s*البريدي|الرقم\s*الإضافي)\s*[:#-]?\s*\d',normalized))
+        address_like=address_label(normalized)
         identifier_like=bool(number_string(normalized,{15}) or re.search(r'(?i)(?:tax\s*code|taxcode|vat\s*(?:no|number)|الرقم\s*الضريبي)',normalized))
-        return (not label_only and not joined_address and not identifier_like and len(normalized)>8 and bool(re.search(r'[A-Za-z\u0600-\u06ff]',normalized)) and
+        return (not label_only and not joined_address and not address_like and not identifier_like and len(normalized)>8 and bool(re.search(r'[A-Za-z\u0600-\u06ff]',normalized)) and
                 not contains(normalized,('invoice','date','vat','tax','building no','street','mobile','postal','number','email',
                     'customer details','customer code','cus code','customer no','cr no','commercial registration',
                     'تفاصيل العميل','تفاصيل العملاء','كود العميل','رقم العميل','السجل التجاري','الرقم الضريبي',
                     'رقم','التاريخ','عنوان','المبنى','الشارع','الحي','الرمز البريدي')))
     def customer_tail(s):
         value=re.sub(r'(?i)^(?:(?:customer|cust\.?|buyer)\s*)?name\s*[:：]?\s*','',s).strip(' :')
-        return re.sub(r'^(?:اسم\s+(?:العميل|المشتري|الزبون))\s*[:：]?\s*','',value).strip(' :')
+        value=re.sub(r'(?i)^(?:customer|buyer|العميل)(?:\s*/\s*(?:customer|العميل))?\s*[:：]?\s*','',value).strip(' :')
+        value=re.sub(r'^(?:اسم\s+(?:العميل|المشتري|الزبون))\s*[:：]?\s*','',value).strip(' :')
+        return re.sub(r'(?i)\s*[:：]?\s*(?:customer|buyer|العميل)(?:\s*/\s*(?:customer|العميل))?\s*$','',value).strip(' :')
     buyer_name=None
     if buyer:
-        explicit=next((w for w in words if y(buyer)-h<y(w)<first_header and
+        name_end=min(first_header,customer_name_end(words,buyer,h,y,first_header))
+        explicit=next((w for w in words if y(buyer)-h<y(w)<name_end and
                        (re.match(r'(?i)^(?:customer\s+)?name\s*:',w['text']) or contains(w['text'],CUSTOMER_NAME_LABELS)) and
                        name_text(customer_tail(w['text']))),None)
-        nearby=[w for w in words if w is not buyer and y(buyer)-h<y(w)<min(first_header,y(buyer)+h*6) and name_text(w['text'])]
+        nearby=[w for w in words if w is not buyer and y(buyer)-h<y(w)<min(name_end,y(buyer)+h*6) and name_text(w['text'])]
         company_like=[w for w in nearby if contains(w['text'],('company','trading','establishment','contracting','شركة','مؤسسة','مؤسسه','مقاولات'))]
         buyer_name=explicit or min(company_like or nearby,key=lambda w:(
             w.get('retry_kind')!='customer_name_ar',abs(y(w)-y(buyer)),
@@ -593,9 +663,11 @@ def parse_layout(pages,filename,language):
     last_header=headers[-1] or 0
     item_bottom=max((e['bbox'][1]+e['bbox'][3] for item in items for e in item['field_evidence'].values() if isinstance(e,dict) and e['page']==pages[-1].get('page',len(pages))),default=last_header)
     footer=[w for w in footer if w['top']>item_bottom]
+    summary,summary_headers=vat_summary_values(footer)
     def total(path,aliases):
         matches=[]
         for label in footer:
+            if label in summary_headers:continue
             if not contains(label['text'],aliases) and not (path=='totals.vat_amount' and re.fullmatch(r'(?i)VAT\s+\d+(?:\.\d+)?%',label['text'].strip())):continue
             if path=='totals.subtotal' and contains(label['text'],('amount due','net','grand')):continue
             if path=='totals.subtotal' and contains(label['text'],('total vat','vat amount','tax amount','المجموع الضريبة')):continue
@@ -636,6 +708,12 @@ def parse_layout(pages,filename,language):
     net=total('totals.net_amount',('grand total','invoice total','amount due','net amount','net total','total with vat','total including vat','total amt including vat','including vat',
         'after tax','الإجمالي بما','قيمة الفاتورة مع الضريبة','المبلغ المستحق','إجمالي الفاتورة','الإجمالي شامل','الإجمالي بعد الضريبة',
         'إجمالي المبلغ شامل الضريبة','إجمالي المبلغ المستحق'))
+    if subtotal is None and 'subtotal' in summary:
+        subtotal=keep('totals.subtotal',summary['subtotal'],numeric(summary['subtotal']['text']))
+    if vat is None and 'vat_amount' in summary:
+        vat=keep('totals.vat_amount',summary['vat_amount'],numeric(summary['vat_amount']['text']))
+    if net is None and 'net_amount' in summary:
+        net=keep('totals.net_amount',summary['net_amount'],numeric(summary['net_amount']['text']))
     # A shared TOTAL row places net and VAT under their respective table columns.
     column_words=clean[-1]
     for label in footer:

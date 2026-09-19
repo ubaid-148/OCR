@@ -6,10 +6,38 @@ from invoice_formatter import contains, center, has_arabic, normalize
 from document_regions import invoice_words
 from layout_invoice import (
     ALIASES, CUSTOMER_SECTION_LABELS, DATE_LABELS, INVOICE_LABELS,
-    header_hint, header_match, numeric, parse_layout, table,
+    address_label, customer_name_end, geometry, header_hint, header_match, numeric, parse_layout, table,
     table_retry_reasons,
 )
 from page_rotation import clamp_crop_bbox, render_upright_page, scale_bbox
+
+
+def _missing_row_reasons(parsed, rows):
+    """Use printed totals only to detect omitted rows, never to invent values."""
+    if not parsed or not rows:
+        return []
+    totals=parsed.get('totals',{})
+    effective={'subtotal':[],'vat_amount':[],'net_amount':[]}
+    for item in rows:
+        qty=numeric(str(item.get('quantity'))) if item.get('quantity') is not None else None
+        amount=numeric(str(item.get('amount'))) if item.get('amount') is not None else None
+        vat=numeric(str(item.get('vat_amount'))) if item.get('vat_amount') is not None else None
+        gross=numeric(str(item.get('gross_amount'))) if item.get('gross_amount') is not None else None
+        discount=numeric(str(item.get('discount'))) if item.get('discount') is not None else 0
+        per_unit=(qty is not None and amount is not None and vat is not None and gross is not None and
+                  abs(qty*(amount+vat)-discount-gross)<=.03)
+        effective['subtotal'].append(qty*amount-discount if per_unit else amount)
+        effective['vat_amount'].append(qty*vat if per_unit else vat)
+        effective['net_amount'].append(gross)
+    reasons=[]
+    for field,label in (('subtotal','subtotal'),('vat_amount','VAT'),('net_amount','net total')):
+        printed=totals.get(field)
+        values=effective[field]
+        if printed is not None and values and all(value is not None for value in values):
+            recovered=sum(values)
+            if float(printed)>recovered+.03:
+                reasons.append(f'printed {label} exceeds recovered item rows')
+    return reasons
 
 
 def plan_regions(page):
@@ -25,12 +53,11 @@ def plan_regions(page):
     candidates=[]
     parsed=parse_layout([page],'','')
     totals=parsed.get('totals',{}) if parsed else {}
-    # A totals/arithmetic review is not evidence that table detection failed. In
-    # particular, some printed invoices are internally inconsistent. Re-reading
-    # every ruled cell in two languages cannot repair that source discrepancy and
-    # is the most expensive part of the pipeline. Reserve the full-table retry for
-    # missing rows/printed columns or reused evidence boxes; totals get tight crops.
+    # Missing totals alone get a footer crop. A positive gap between printed
+    # totals and complete rows also warrants one bounded search for omitted rows.
     table_issues=table_retry_reasons(words,rows,header,h)
+    table_issues.extend(reason for reason in _missing_row_reasons(parsed,rows)
+                        if reason not in table_issues)
     incomplete_table=bool(table_issues)
     known_invoice=parsed and parsed['invoice'].get('invoice_number')
     known_invoice_evidence=parsed.get('field_evidence',{}).get('invoice.invoice_number') if parsed else None
@@ -76,6 +103,7 @@ def plan_regions(page):
     customer_value=parsed.get('customer',{}).get('name') if parsed else None
     customer_evidence=parsed.get('field_evidence',{}).get('customer.name',{}) if parsed else {}
     bad_customer=(not customer_value or contains(customer_value,CUSTOMER_SECTION_LABELS) or
+                  address_label(customer_value) or
                   re.search(r'(?i)(?:building|post\s*code|add\s*no|المبنى|الرمز\s*البريدي)\s*\d',customer_value) or
                   customer_evidence and customer_evidence.get('source')!='native_text' and
                   float(customer_evidence.get('confidence') or 0)<80)
@@ -83,6 +111,8 @@ def plan_regions(page):
         customer_anchor=next((w for w in words if contains(w['text'],CUSTOMER_SECTION_LABELS) and
                               not contains(w['text'],('customer code','cus code','customer no','vat','tax','كود العميل','رقم العميل','الضريبي'))),None)
         if customer_anchor:
+            _,row_y=geometry(words)
+            name_end=customer_name_end(words,customer_anchor,h,row_y,header_limit)
             labels=[w for w in words if abs(center(w)[1]-center(customer_anchor)[1])<h*1.5 and
                     contains(w['text'],CUSTOMER_SECTION_LABELS) and
                     not contains(w['text'],('vat','tax','الضريبي'))]
@@ -95,6 +125,19 @@ def plan_regions(page):
             else:
                 add_row(customer_anchor,'customer_name_ar','ar')
                 candidates[-1].update(dpi=400, enhance=True)
+            # Many bilingual forms place the value immediately left of the
+            # combined "Customer / العميل" label instead of between two labels.
+            label_left=min(w['left'] for w in labels)
+            value_left=max(0,label_left-page_width*.48)
+            value_right=label_left-h*.15
+            if value_right-value_left>h*4:
+                candidates.append(dict(kind='customer_name_ar',original=customer_anchor,language='ar',
+                    dpi=400,enhance=True,bbox=[value_left,min(w['top'] for w in labels)-h*.35,
+                                             value_right,max(w['top']+w['height'] for w in labels)+h*.35]))
+            for region in candidates:
+                if region['kind']=='customer_name_ar':
+                    region['bbox'][3]=min(region['bbox'][3],
+                        name_end+center(customer_anchor)[1]-row_y(customer_anchor))
     if parsed and not parsed['invoice'].get('payment_method'):
         payment_anchor=next((w for w in words if contains(w['text'],('payment method','payment mthd','payment methd','payment type','طريقة الدفع','نوع الدفع'))),None)
         if payment_anchor:
@@ -109,12 +152,16 @@ def plan_regions(page):
         if date_anchor:
             candidates.append(dict(kind='invoice_identifier',original=date_anchor,language='en',
                 bbox=[page_width*.45,max(0,date_anchor['top']-h*4),page_width,date_anchor['top']+h*.5]))
-    if parsed and (totals.get('subtotal') is None or totals.get('net_amount') is None):
+    if parsed and any(totals.get(key) is None for key in ('subtotal','vat_amount','net_amount')):
         item_bottom=max((e['bbox'][1]+e['bbox'][3] for item in rows for e in item.get('field_evidence',{}).values()
                          if isinstance(e,dict)),default=header or hint or page_height*.5)
         # Totals may sit on either side after a very tall, mostly empty item grid.
+        footer_start=min((w['top']-h*.5 for w in words if w['top']>item_bottom and
+                          contains(w['text'],('vat summary','tax summary','subtotal','total vat',
+                                   'total excluding vat','total including vat','grand total'))),
+                         default=max(item_bottom+h*.5,page_height*.5))
         candidates.append(dict(kind='footer_totals',original={},language='en',dpi=400,enhance=True,
-            bbox=[0,max(item_bottom+h*.5,page_height*.5),page_width,page_height]))
+            bbox=[0,max(item_bottom,footer_start),page_width,page_height]))
     discount_evidence=parsed.get('field_evidence',{}).get('totals.discount',{}) if parsed else {}
     if parsed and (totals.get('discount') is None or
                    discount_evidence.get('source')!='native_text' and float(discount_evidence.get('confidence') or 0)<80):
@@ -140,9 +187,20 @@ def plan_regions(page):
         text=w['text']
         if center(w)[1]<header_limit:
             if not known_invoice and (contains(text,INVOICE_LABELS) or 'رقم' in text and 'فاتور' in text) and not re.search(r'\b[A-Za-z]+[-/]\d+',text):
-                # Bilingual forms commonly place the value in a separate box to the label's left.
-                add_row(w,'invoice_identifier','en')
-                candidates[-1].update(dpi=400,enhance=True)
+                # Exclude the label itself and keep both possible value sides.
+                # A short serial crop avoids unrelated handwriting elsewhere in
+                # the header and works for either left-to-right or Arabic forms.
+                peers=sorted((p for p in words if contains(p['text'],INVOICE_LABELS) and
+                              abs(center(p)[1]-center(w)[1])<h),key=lambda p:p['left'])
+                if not peers:peers=[w]
+                starts=[0]+[p['left']+p['width']+h*.15 for p in peers]
+                ends=[p['left']-h*.15 for p in peers]+[page_width]
+                for left,right in zip(starts,ends):
+                    if right-left<h*3:continue
+                    region=dict(kind='invoice_identifier',original=w,language='en',dpi=400,
+                                enhance=True,bbox=[left,w['top']-h*.4,right,w['top']+w['height']+h*.4])
+                    if not any(r['kind']=='invoice_identifier' and r['bbox']==region['bbox'] for r in candidates):
+                        candidates.append(region)
             elif not known_vats and contains(text,('vat','tax code','رقم ضريبة','رقم ضريبه','الرقم الضريبي')) and not re.search(r'(?<!\d)\d{15}(?!\d)',text) and not re.search(r'%|amount|without|including',text,re.I):
                 add_row(w,'vat_identifier','en')
                 candidates[-1]['bbox'][1] -= h
@@ -232,14 +290,16 @@ def plan_regions(page):
     if incomplete_table and hint is not None:
         footer_y=min((center(w)[1] for w in words if center(w)[1]>hint+2*h and
                       (normalize(w['text']).strip(' :').casefold() in {'total','مجموع'} or contains(w['text'],(
-                          'subtotal','grand total','invoice total','total excluding vat','total including vat',
+                          'subtotal','grand total','invoice total','total excluding vat','total including vat','vat summary','tax summary',
                           'total vat','before tax','after tax','الإجمالي قبل الضريبة','الإجمالي بعد الضريبة',
                           'إجمالي ضريبة القيمة المضافة','إجمالي المبلغ')))),default=None)
         table_end=footer_y-h*.4 if footer_y is not None else min(page_height*.85,hint+max(12*h,page_height*.25))
         arabic_table=any(has_arabic(w['text']) and hint-3*h<center(w)[1]<table_end for w in words)
         candidates.insert(0,dict(bbox=[0,hint-h,page_width,max(hint+4*h,table_end)],kind='table_cells',original={},
                                  language='ar' if arabic_table else 'en',
-                                 recover_text=not rows or 'numeric item row lacks a recovered description' in table_issues,
+                                 recover_text=not rows or any(
+                                     reason=='numeric item row lacks a recovered description' or
+                                     reason.startswith('printed ') for reason in table_issues),
                                  recover_headers=bool(rows),retry_reasons=table_issues))
     return candidates
 
@@ -282,7 +342,8 @@ def grid_cells(pdf_page,region,dpi,page_width,page_height,rotation_degrees=0,
     return [dict(kind='table_cells',bbox=[a+2,y0,b-2,y1],original={},language=region.get('language','ar')) for a,b in zip(edges,edges[1:]) if b-a>15][:16]
 
 
-def retry_regions(pdf_page,page_payload,model,extract_words,temp_root,missing_numeric_only=False):
+def retry_regions(pdf_page,page_payload,model,extract_words,temp_root,missing_numeric_only=False,
+                  planned_kinds=None):
     dpi=page_payload.get('render_dpi',200);scale=300/dpi
     page_width=page_payload.get('canonical_width',pdf_page.get_width()*dpi/72)
     page_height=page_payload.get('canonical_height',pdf_page.get_height()*dpi/72)
@@ -297,6 +358,8 @@ def retry_regions(pdf_page,page_payload,model,extract_words,temp_root,missing_nu
     retries=[]
     regions=[]
     for region in plan_regions(page_payload):
+        if planned_kinds is not None and region['kind'] not in planned_kinds:
+            continue
         if missing_numeric_only and (region['kind'] != 'numeric_cell' or region['original'].get('text')):
             continue
         if region['kind']=='table_cells':
@@ -414,9 +477,20 @@ def retry_regions(pdf_page,page_payload,model,extract_words,temp_root,missing_nu
                         if region['kind']=='customer_name_ar' else
                         not contains(w['text'],ALIASES['description']))
                        for w in found)
-        if faint_arabic and predictor is not None and not strong_arabic():
-            # Dilation of dark pixels can join faint Arabic dots. Retry the
-            # original crop so the recognizer sees both image versions.
+        needs_plain=(
+            faint_arabic and not strong_arabic() or
+            region['kind']=='invoice_identifier' and not any(
+                float(w.get('confidence') or 0)>=75 and
+                re.fullmatch(r'\d{3,14}',w['text'].strip(' .:#')) for w in found) or
+            region['kind']=='footer_totals' and
+            sum(numeric(w['text']) is not None for w in found)<3 or
+            region['kind']=='footer_discount' and
+            not any(numeric(w['text']) is not None for w in found)
+        )
+        plain_path=None
+        if needs_plain and predictor is not None:
+            # Dilation can join faint strokes or damage light coloured print.
+            # Retry the original crop so recognition sees both image versions.
             plain_path=Path(temp_root)/f'retry-{i}-plain.png'
             try:
                 picture.save(plain_path)
@@ -440,7 +514,7 @@ def retry_regions(pdf_page,page_payload,model,extract_words,temp_root,missing_nu
             # recognition pass over the original value crop may recover it.
             import cv2
             try:
-                source_path=plain_path if plain_path.is_file() else path
+                source_path=plain_path if plain_path and plain_path.is_file() else path
                 for result in predictor.paddlex_pipeline.text_rec_model([cv2.imread(str(source_path))]):
                     found.append(dict(text=result['rec_text'],confidence=float(result['rec_score'])*100,
                                       left=x0,top=y0,width=x1-x0,height=y1-y0,
@@ -464,7 +538,14 @@ def merge_retries(page, retries):
         kind=retry['kind'];candidates=[]
         for word in retry['words']:
             text=word['text'].strip()
-            confidence_floor=80 if kind in {'supplier_name','supplier_name_ar','supplier_name_en','customer_name_ar','payment_method','description','description_ar'} else 85
+            if kind in {'footer_totals','footer_discount'}:
+                confidence_floor=70
+            elif kind=='invoice_identifier':
+                confidence_floor=75
+            elif kind in {'supplier_name','supplier_name_ar','supplier_name_en','customer_name_ar','payment_method','description','description_ar'}:
+                confidence_floor=80
+            else:
+                confidence_floor=85
             if word.get('confidence',0)<confidence_floor:continue
             if kind=='vat_identifier' and re.search(r'(?<!\d)\d{15}(?!\d)',text):
                 candidates.append(word)
@@ -504,7 +585,8 @@ def merge_retries(page, retries):
             elif kind=='supplier_name_en' and re.search(r'[A-Za-z]{3,}',text) and contains(text,('company','trading','est','establishment','co')):
                 candidates.append(word)
             elif (kind=='customer_name_ar' and len(re.findall(r'[\u0600-\u06ff]',text))>=8 and
-                  len(text.split())>=2 and not contains(text,CUSTOMER_SECTION_LABELS)):
+                  len(text.split())>=2 and not contains(text,CUSTOMER_SECTION_LABELS) and
+                  not address_label(text)):
                 candidates.append(word)
             elif kind=='payment_method' and contains(text,('cash','card','credit','mada','span','network')):
                 candidates.append(word)

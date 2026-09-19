@@ -259,23 +259,38 @@ def _extract_pdf(input_path, languages, paddle_language, model, progress=lambda 
                     progress(f'Checking uncertain fields on page {number}')
                     retries=retry_regions(page,page_payload,lambda lang='en':model(lang),extract_words,temp_root)
                     merge_retries(page_payload,retries)
+                    all_retries=list(retries)
+                    def merge_additional(extra):
+                        if not extra:
+                            return
+                        prior=list(page_payload['targeted_ocr']['accepted'])
+                        merge_retries(page_payload,extra)
+                        page_payload['targeted_ocr']['accepted']=prior+page_payload['targeted_ocr']['accepted']
+                        all_retries.extend(extra)
+                        page_payload['targeted_ocr']['alternatives']=list(all_retries)
+                        page_payload['targeted_ocr']['attempted_regions']=len(all_retries)
+                    # Footer evidence can reveal that an apparently complete set
+                    # of rows is short. Re-plan only the table after totals merge.
+                    table_kinds={'table_area','table_area_en','table_cells','table_cells_en'}
+                    if (any(r['kind']=='footer_totals' for r in retries) and
+                            not any(r['kind'] in table_kinds for r in retries)):
+                        table_retries=retry_regions(
+                            page,page_payload,lambda lang='en':model(lang),
+                            extract_words,temp_root,planned_kinds={'table_cells'})
+                        merge_additional(table_retries)
                     # Recovered prices can reveal rows that did not exist when
                     # the first retry plan was made. Re-plan numeric cells once.
-                    if any(r['kind'] in {'table_area', 'table_area_en', 'table_cells', 'table_cells_en'} for r in retries):
+                    if any(r['kind'] in table_kinds for r in all_retries):
                         numeric_retries=retry_regions(page,page_payload,lambda lang='en':model(lang),
                             extract_words,temp_root,missing_numeric_only=True)
-                        prior=list(page_payload['targeted_ocr']['accepted'])
-                        merge_retries(page_payload,numeric_retries)
-                        page_payload['targeted_ocr']['accepted']=prior+page_payload['targeted_ocr']['accepted']
-                        page_payload['targeted_ocr']['alternatives']=retries+numeric_retries
-                        page_payload['targeted_ocr']['attempted_regions']=len(retries)+len(numeric_retries)
+                        merge_additional(numeric_retries)
                 except Exception as error:
                     page_payload['targeted_ocr_error']=str(error)[:500]
                 page_payload['targeted_ocr_seconds']=round(perf_counter()-retry_started,3)
             pages.append(page_payload)
             page.close()
     return {
-        "pipeline_version": "2026-09-ruled-grid-v10",
+        "pipeline_version": "2026-09-ruled-grid-v11",
         "engine": f"PDFium native text / PaddleOCR 3 ({paddle_language})",
         "language": languages, "pages": pages,
         "page_orientations": [page_orientation(page) for page in pages],

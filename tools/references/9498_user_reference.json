@@ -1,9 +1,15 @@
 {
-  "reference_status": "user_supplied_numeric_values_not_source_verified",
+  "reference_status": "source_verified_2026-09-19",
+  "source_sha256": "302efd5a084aa886ebd3f54cab7c25acf6eb48e50799d2238208bb8bc97e29b1",
+  "invoice_number": "2690111862",
+  "invoice_date": "09/03/2026",
+  "supplier_vat_number": "310981818100003",
+  "customer_name": "مؤسسة علي محمد ال ريح للمقاولات العامة",
+  "customer_vat_number": "300402905100003",
   "items": [
-    {"item_code": "1212", "quantity": 2, "unit_price": 14.79, "amount": 14.79, "vat_rate": "15%", "vat_amount": 2.22, "gross_amount": 34.02},
-    {"item_code": "1218", "quantity": 1, "unit_price": 50.44, "amount": 50.44, "vat_rate": "15%", "vat_amount": 7.57, "gross_amount": 58.01},
-    {"item_code": "5007", "quantity": 1, "unit_price": 14.79, "amount": 14.79, "vat_rate": "15%", "vat_amount": 2.22, "gross_amount": 17.01}
+    {"item_code": "1212", "description": "زيت شل هيلكس HELIX 15/40", "quantity": 2, "unit_price": 14.79, "amount": 14.79, "vat_rate": "15%", "vat_amount": 2.22, "gross_amount": 34.02},
+    {"item_code": "1218", "description": "زيت شل هيلكس HELIX 4لتر*15/40", "quantity": 1, "unit_price": 50.44, "amount": 50.44, "vat_rate": "15%", "vat_amount": 7.57, "gross_amount": 58.01},
+    {"item_code": "5007", "description": "سيفون تويوتا وكالة D4", "quantity": 1, "unit_price": 14.79, "amount": 14.79, "vat_rate": "15%", "vat_amount": 2.22, "gross_amount": 17.01}
   ],
-  "totals": {"subtotal": 94.81, "vat_amount": 14.22, "net_amount": 109.03}
+  "totals": {"subtotal": 94.81, "discount": 0.0, "vat_rate": 15.0, "vat_amount": 14.22, "net_amount": 109.03, "currency": "SAR"}
 }

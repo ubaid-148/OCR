@@ -11,6 +11,45 @@ def box(text, x, y, scale=1):
 
 
 class LayoutInvoiceTests(unittest.TestCase):
+    def summary_page(self):
+        words=[box(t,x,300) for t,x in [('Description',100),('Qty',400),('Rate',600),('Amount',800)]]
+        words += [box(t,x,360) for t,x in [('Example item',100),('2',400),('10',600),('20',800)]]
+        words += [box('VAT Summary',700,500)]
+        words += [box(t,x,540) for t,x in [('Inc Tax',500),('Tax Amount',700),('Before Tax',900)]]
+        words += [box(t,x,580) for t,x in [('23.00',500),('3.00',700),('20.00',900)]]
+        return words
+
+    def test_vat_summary_recovers_missing_totals_with_printed_evidence(self):
+        result=parse_layout([{'words':self.summary_page()}],'arbitrary.pdf','eng')
+        for key,value in [('subtotal',20),('vat_amount',3),('net_amount',23)]:
+            self.assertEqual(result['totals'][key],value)
+            self.assertEqual(result['field_evidence']['totals.'+key]['bbox'][1],580)
+        self.assertEqual(len(result['items']),1)
+
+    def test_summary_does_not_replace_explicit_printed_total(self):
+        words=self.summary_page()+[box('Grand Total',100,680),box('24.00',400,680)]
+        result=parse_layout([{'words':words}],'arbitrary.pdf','eng')
+        self.assertEqual(result['totals']['net_amount'],24)
+
+    def test_multiple_summary_bands_are_not_mistaken_for_document_totals(self):
+        words=self.summary_page()+[box(t,x,610) for t,x in [('12.00',500),('2.00',700),('10.00',900)]]
+        result=parse_layout([{'words':words}],'arbitrary.pdf','eng')
+        for key in ('subtotal','vat_amount','net_amount'):
+            self.assertIsNone(result['totals'][key])
+
+    def test_customer_search_stops_before_unlabelled_street_value(self):
+        words=self.summary_page()+[box('Customer',1000,100),box('Street',1000,145),
+                                   box('Long Avenue Road',600,145)]
+        result=parse_layout([{'words':words}],'arbitrary.pdf','eng')
+        self.assertIsNone(result['customer']['name'])
+
+    def test_recovered_serial_wins_even_when_label_sorts_before_crop(self):
+        words=self.summary_page()+[box('Invoice Serial: 9876',800,100),
+                                   dict(box('INV-456',400,104),source='targeted_ocr',
+                                        retry_kind='invoice_identifier',confidence=79)]
+        result=parse_layout([{'words':words}],'arbitrary.pdf','eng')
+        self.assertEqual(result['invoice']['invoice_number'],'INV-456')
+
     def test_wrapped_description_and_partial_row_are_retained(self):
         words = [box(t,x,300) for t,x in [("Description",100),("Qty",400),("Rate",600),("Amount",800)]]
         words += [box(t,x,360) for t,x in [("Steel hinge",100),("2",400),("3",600),("6",800)]]
@@ -78,6 +117,29 @@ class LayoutInvoiceTests(unittest.TestCase):
         words.append(handwritten)
         result=parse_layout([{'words':words}],'example.pdf','eng')
         self.assertEqual(result['invoice']['invoice_number'],'321')
+
+    def test_customer_name_beats_joined_street_text(self):
+        words = [box(t, x, 300) for t,x in [('Description',300),('Qty',600),
+                 ('Unit Price',800),('Amount',1000)]]
+        words += [box(t,x,360) for t,x in [('Example item',300),('1',600),
+                  ('5.00',800),('5.00',1000)]]
+        words += [
+            box('Customer / العميل',1050,100),
+            box('مؤسسة علي محمد ال ريح للمقاولات العامة',550,100),
+            box('الشارعالثالث عشر',700,145),
+        ]
+        result=parse_layout([{'words':words}],'example.pdf','eng+ara')
+        self.assertEqual(result['customer']['name'],
+                         'مؤسسة علي محمد ال ريح للمقاولات العامة')
+
+    def test_joined_street_is_not_accepted_as_customer_name(self):
+        words = [box(t, x, 300) for t,x in [('Description',300),('Qty',600),
+                 ('Unit Price',800),('Amount',1000)]]
+        words += [box(t,x,360) for t,x in [('Example item',300),('1',600),
+                  ('5.00',800),('5.00',1000)]]
+        words += [box('Customer / العميل',1050,100),box('الشارعالثالث عشر',700,145)]
+        result=parse_layout([{'words':words}],'example.pdf','eng+ara')
+        self.assertIsNone(result['customer']['name'])
 
     def test_address_and_vat_rate_are_not_money(self):
         self.assertIsNone(numeric("Building No.,City : 6616,Al Khobar"))
