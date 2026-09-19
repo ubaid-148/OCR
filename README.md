@@ -57,6 +57,8 @@ before opening the PDF upload prompt.
 The sample check does not run live OCR; the first PDF upload does. After upload,
 the notebook prints the OCR device, pipeline version, and stage timings above the
 downloaded invoice JSON. Check that the device says `gpu:0` when testing on T4.
+If a GPU is unavailable, the notebook now falls back to CPU instead of stopping;
+the OCR result flow remains the same but takes longer.
 Focused retries now reread faint customer names and item descriptions from both
 enhanced and original crops. A numeric item row without a readable description
 triggers a table reread; a failed crop is reported while other retries continue.

@@ -84,7 +84,7 @@ class ColabUploadTests(unittest.TestCase):
             calls, downloads, output, _, preparations = self.run_cell(
                 root, recover_runtime=True
             )
-            self.assertEqual(preparations, [(root, True)])
+            self.assertEqual(preparations, [(root, False)])
             self.assertEqual(len(calls), 2)
             self.assertEqual(len(downloads), 1)
             self.assertIn('preparing it now', output)

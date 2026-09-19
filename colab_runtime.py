@@ -95,6 +95,12 @@ def prepare_runtime(project_dir: str | Path, require_gpu: bool = True) -> str:
             "No GPU is attached. In Colab choose Runtime > Change runtime type > "
             "T4 GPU, reconnect, then run the cell again."
         )
+    if not use_gpu:
+        print(
+            "No GPU is attached; continuing with CPU. OCR will be slower. "
+            "Choose a T4 runtime for faster processing.",
+            flush=True,
+        )
     configure_environment(use_gpu)
     fingerprint = _fingerprint(project_dir, use_gpu)
 
