@@ -552,9 +552,12 @@ def retry_regions(pdf_page,page_payload,model,extract_words,temp_root,missing_nu
 def merge_retries(page, retries):
     """Retain raw alternatives; only promote typed, confident region candidates."""
     words=list(page['words']);accepted=[]
+    rejected=list(page.get('targeted_ocr',{}).get('rejected',[]))
     heights=sorted(float(w.get('height',20)) for w in words if w.get('height',0)>0)
     text_height=heights[len(heights)//2] if heights else 20
     for retry in retries:
+        previous_words=list(words)
+        accepted_start=len(accepted)
         kind=retry['kind'];candidates=[]
         for word in retry['words']:
             text=word['text'].strip()
@@ -628,9 +631,27 @@ def merge_retries(page, retries):
             # Do not duplicate a successfully read same-language source phrase.
             if any(w['text'].casefold()==old['text'].casefold() and abs(center(w)[1]-center(old)[1])<old.get('height',20) and abs(center(w)[0]-center(old)[0])<max(w.get('width',1),old.get('width',1))*.5 for old in words):continue
             words.append(w);accepted.append(dict(kind=kind,text=w['text'],bbox=[w[k] for k in ('left','top','width','height')]))
+        if kind=='numeric_cell' and candidates:
+            before,_,_=table(previous_words)
+            after,_,_=table(words)
+            def row_y(item):
+                evidence=item.get('field_evidence',{})
+                boxes=[ev['bbox'] for key,ev in evidence.items()
+                       if key!='description' and isinstance(ev,dict) and 'bbox' in ev]
+                return median(b[1]+b[3]/2 for b in boxes) if boxes else None
+            remaining=[row_y(item) for item in after]
+            lost=any(row_y(item) is not None and not any(
+                value is not None and abs(row_y(item)-value)<text_height
+                for value in remaining) for item in before)
+            if lost:
+                words=previous_words
+                del accepted[accepted_start:]
+                rejected.append(dict(kind=kind,bbox=retry.get('bbox'),
+                                     reason='numeric retry would remove an existing item row'))
     page['words']=words
     page['text']='\n'.join(w['text'] for w in words)
-    page['targeted_ocr']={'attempted_regions':len(retries),'accepted':accepted,'alternatives':retries}
+    page['targeted_ocr']={'attempted_regions':len(retries),'accepted':accepted,'alternatives':retries,
+                          'rejected':rejected}
     errors=[f"{retry['kind']}: {retry['error']}" for retry in retries if retry.get('error')]
     if errors:
         previous=page.get('targeted_ocr_error')

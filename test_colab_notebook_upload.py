@@ -71,6 +71,8 @@ class ColabUploadTests(unittest.TestCase):
             self.assertIn('needs_review', output)
             self.assertNotIn('RAW OCR', output)
             self.assertFalse(Path(calls[0][3]).exists())  # Temporary PDF removed.
+            diagnostic=Path(downloads[0]).with_name('invoice-invoice-diagnostics.json')
+            self.assertEqual(json.loads(diagnostic.read_text()),{'pages':[]})
 
     def test_ocr_failure_does_not_parse_or_download_a_result(self):
         with tempfile.TemporaryDirectory() as directory:

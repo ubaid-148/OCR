@@ -13,6 +13,25 @@ from test_invoice_evidence import sample
 
 
 class InvoiceRegionTests(unittest.TestCase):
+    def test_numeric_retry_cannot_erase_partial_per_unit_row(self):
+        words=[box(t,x,300) for t,x in [
+            ('Including VAT',20),('VAT Amount',130),('Taxable Amount',390),
+            ('Unit Price',540),('Quantity',650),('Description',850)]]
+        words += [box(t,x,360) for t,x in [
+            ('23.00',20),('1.50',130),('10.00',390),('2',650),('Example oil',850)]]
+        original=box('',540,360)
+        for value,expected in [('999.00',None),('10.00',10.0)]:
+            with self.subTest(value=value):
+                page=dict(words=copy.deepcopy(words))
+                retry=dict(kind='numeric_cell',original=original,
+                           words=[dict(box(value,540,360),source='targeted_ocr',retry_kind='numeric_cell')])
+                merge_retries(page,[retry])
+                rows,_,_=table(page['words'])
+                self.assertEqual(len(rows),1)
+                self.assertEqual(rows[0]['unit_price'],expected)
+                self.assertEqual(bool(page['targeted_ocr']['rejected']),expected is None)
+                self.assertEqual(page['targeted_ocr']['alternatives'],[retry])
+
     def test_missing_serial_and_price_use_direct_recognition(self):
         from types import SimpleNamespace
         class PdfPage:

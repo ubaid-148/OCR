@@ -253,6 +253,7 @@ def _extract_pdf(input_path, languages, paddle_language, model, progress=lambda 
                 "text": "\n".join(item["text"] for item in words),
             }
             page_payload['receipt_region']=receipt_region(words,upright_image.width,upright_image.height)
+            page_payload['base_words']=[dict(word) for word in words]
             if os.environ.get('OCR_TARGETED_RETRY','true').lower() not in {'false','0','no'}:
                 retry_started=perf_counter()
                 try:
@@ -290,7 +291,7 @@ def _extract_pdf(input_path, languages, paddle_language, model, progress=lambda 
             pages.append(page_payload)
             page.close()
     return {
-        "pipeline_version": "2026-09-ruled-grid-v12",
+        "pipeline_version": "2026-09-ruled-grid-v13",
         "engine": f"PDFium native text / PaddleOCR 3 ({paddle_language})",
         "language": languages, "pages": pages,
         "page_orientations": [page_orientation(page) for page in pages],
