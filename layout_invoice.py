@@ -388,6 +388,20 @@ def table(words):
             desc=[w for w in row if is_desc(w)]
             next_y=y(unique[i+1]) if i+1<len(unique) else stop
             desc += [w for w in body if w not in row and h*1.15<=y(w)-y(anchor)<=h*2.5 and y(w)<next_y-h*.8 and is_desc(w)]
+            # Different OCR passes can read the same ink differently. Keep one
+            # reading of overlapping same-script text, while retaining separate
+            # Latin product codes and wrapped description lines.
+            selected=[]
+            for word in sorted(desc,key=lambda w:(w.get('source')!='targeted_ocr',
+                                                  -float(w.get('confidence') or 0),-len(w['text']))):
+                def same_ink(other):
+                    if has_arabic(word['text'])!=has_arabic(other['text']):return False
+                    overlap=max(0,min(word['left']+word['width'],other['left']+other['width'])-
+                                max(word['left'],other['left']))
+                    return (abs(y(word)-y(other))<h*.7 and
+                            overlap>min(word['width'],other['width'])*.6)
+                if not any(same_ink(other) for other in selected):selected.append(word)
+            desc=selected
             if any(w.get('source')=='targeted_ocr' and has_arabic(w['text']) for w in desc):
                 # Prefer the focused Arabic re-read over a low-confidence Latin
                 # hallucination produced from the same faint dot-matrix text.
@@ -611,7 +625,8 @@ def parse_layout(pages,filename,language):
         nearby=[w for w in words if w is not buyer and y(buyer)-h<y(w)<min(name_end,y(buyer)+h*6) and name_text(w['text'])]
         company_like=[w for w in nearby if contains(w['text'],('company','trading','establishment','contracting','شركة','مؤسسة','مؤسسه','مقاولات'))]
         buyer_name=explicit or min(company_like or nearby,key=lambda w:(
-            w.get('retry_kind')!='customer_name_ar',abs(y(w)-y(buyer)),
+            w.get('retry_kind')!='customer_name_ar',abs(y(w)-y(buyer))>h,
+            -len(w['text'].split()),abs(y(w)-y(buyer)),
             abs(center(w)[0]-center(buyer)[0])),default=None)
     customer_value=None
     if buyer_name:

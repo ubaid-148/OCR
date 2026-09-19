@@ -11,6 +11,20 @@ def box(text, x, y, scale=1):
 
 
 class LayoutInvoiceTests(unittest.TestCase):
+    def test_full_customer_crop_beats_short_confident_fragment(self):
+        words=self.summary_page()+[box('Customer',1000,100)]
+        for text,x,confidence in [('مؤسسة على',800,99),('مؤسسة علي محمد للمقاولات العامة',500,90)]:
+            words.append(dict(box(text,x,100),source='targeted_ocr',
+                              retry_kind='customer_name_ar',confidence=confidence))
+        result=parse_layout([{'words':words}],'arbitrary.pdf','eng+ara')
+        self.assertEqual(result['customer']['name'],'مؤسسة علي محمد للمقاولات العامة')
+
+    def test_overlapping_description_passes_do_not_duplicate_text(self):
+        words=self.summary_page()
+        words += [dict(box('Example corrected item',100,360),source='targeted_ocr',confidence=94)]
+        result=parse_layout([{'words':words}],'arbitrary.pdf','eng')
+        self.assertEqual(result['items'][0]['description'],'Example corrected item')
+
     def summary_page(self):
         words=[box(t,x,300) for t,x in [('Description',100),('Qty',400),('Rate',600),('Amount',800)]]
         words += [box(t,x,360) for t,x in [('Example item',100),('2',400),('10',600),('20',800)]]

@@ -103,6 +103,8 @@ def plan_regions(page):
     customer_value=parsed.get('customer',{}).get('name') if parsed else None
     customer_evidence=parsed.get('field_evidence',{}).get('customer.name',{}) if parsed else {}
     bad_customer=(not customer_value or contains(customer_value,CUSTOMER_SECTION_LABELS) or
+                  has_arabic(customer_value) and len(customer_value.split())<3 and
+                  contains(customer_value,('مؤسسة','مؤسسه','شركة')) or
                   address_label(customer_value) or
                   re.search(r'(?i)(?:building|post\s*code|add\s*no|المبنى|الرمز\s*البريدي)\s*\d',customer_value) or
                   customer_evidence and customer_evidence.get('source')!='native_text' and
@@ -244,10 +246,19 @@ def plan_regions(page):
                 _,ry,_,rh=row_evidence['bbox']
                 original=dict(left=heading['left'],top=ry,width=heading['width'],height=rh,text='')
                 add(original,'numeric_cell')
-                # Padding by a whole glyph height crossed narrow Qty columns
-                # and included the adjacent price. Keep the retry inside the
-                # heading width and below the table rule.
-                candidates[-1]['bbox']=[heading['left']-h*.1,ry-h*.25,heading['left']+heading['width']+h*.1,ry+rh+h*.25]
+                # Bound retries by ruled columns or neighbouring column centres;
+                # glyph width alone can clip a right-aligned printed price.
+                column=heading.get('grid_column')
+                if column:
+                    left,right=column
+                else:
+                    cx=center(heading)[0]
+                    neighbors=[center(w)[0] for w in header_words if w is not heading and
+                               any(header_match(w['text'],ALIASES[k]) for k in ALIASES)]
+                    left=max((x for x in neighbors if x<cx),default=cx-heading['width'])
+                    right=min((x for x in neighbors if x>cx),default=cx+heading['width'])
+                    left,right=(left+cx)/2,(right+cx)/2
+                candidates[-1]['bbox']=[left+h*.1,ry-h*.3,right-h*.1,ry+rh+h*.3]
                 candidates[-1]['dpi']=400
                 candidates[-1].update(language='en', enhance=True)
         if item.get('quantity') is None:
@@ -478,7 +489,9 @@ def retry_regions(pdf_page,page_payload,model,extract_words,temp_root,missing_nu
                         not contains(w['text'],ALIASES['description']))
                        for w in found)
         needs_plain=(
-            faint_arabic and not strong_arabic() or
+            region['kind']=='customer_name_ar' or faint_arabic and not strong_arabic() or
+            region['kind']=='numeric_cell' and not any(
+                float(w.get('confidence') or 0)>=85 and numeric(w['text']) is not None for w in found) or
             region['kind']=='invoice_identifier' and not any(
                 float(w.get('confidence') or 0)>=75 and
                 re.fullmatch(r'\d{3,14}',w['text'].strip(' .:#')) for w in found) or
@@ -509,7 +522,14 @@ def retry_regions(pdf_page,page_payload,model,extract_words,temp_root,missing_nu
                                       source='targeted_ocr',retry_kind=region['kind']))
             except Exception as error:
                 errors.append(f'direct OCR: {type(error).__name__}: {str(error)[:180]}')
-        if faint_arabic and predictor is not None and not strong_arabic():
+        direct_needed=(region['kind']=='customer_name_ar' or
+                       faint_arabic and not strong_arabic() or
+                       region['kind']=='invoice_identifier' and not any(
+                           float(w.get('confidence') or 0)>=75 and
+                           re.fullmatch(r'\d{3,14}',w['text'].strip(' .:#')) for w in found) or
+                       region['kind']=='numeric_cell' and not any(
+                           float(w.get('confidence') or 0)>=85 and numeric(w['text']) is not None for w in found))
+        if direct_needed and predictor is not None:
             # The detector can miss an entire faint dot-matrix line. A direct
             # recognition pass over the original value crop may recover it.
             import cv2

@@ -13,6 +13,27 @@ from test_invoice_evidence import sample
 
 
 class InvoiceRegionTests(unittest.TestCase):
+    def test_missing_serial_and_price_use_direct_recognition(self):
+        from types import SimpleNamespace
+        class PdfPage:
+            def get_width(self): return 72
+            def get_height(self): return 72
+        for kind,text in [('invoice_identifier','4567890123'),('numeric_cell','18.75')]:
+            with self.subTest(kind=kind):
+                predictor=SimpleNamespace(predict=lambda *a,**k: [],
+                    paddlex_pipeline=SimpleNamespace(text_rec_model=lambda images:
+                        [{'rec_text':text,'rec_score':.96}]))
+                original=box('',20,20)
+                region=dict(kind=kind,bbox=[20,20,150,40],original=original,
+                            language='en',dpi=200,enhance=True)
+                page=dict(words=[],render_dpi=200,canonical_width=200,canonical_height=200)
+                with tempfile.TemporaryDirectory() as temporary, \
+                     patch('targeted_ocr.plan_regions',return_value=[region]), \
+                     patch('targeted_ocr.render_upright_page',return_value=Image.new('RGB',(200,200),'white')):
+                    retries=retry_regions(PdfPage(),page,lambda *args: predictor,lambda result: result,Path(temporary))
+                merge_retries(page,retries)
+                self.assertEqual(page['targeted_ocr']['accepted'][0]['text'],text)
+
     def test_retry_planning_does_not_require_item_detection(self):
         words=[box('رقم الفاتورة',100,100),box('كود الصنف',20,300),box('اسم الصنف',300,300),box('الاجمالي',1000,300)]
         plans=plan_regions(dict(words=words,width=432,height=576,render_dpi=200))
