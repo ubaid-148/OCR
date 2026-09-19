@@ -51,6 +51,9 @@ Step 1 prints the Git commit being tested. Step 2 checks the Paddle device and
 runs a committed invoice sample through the parser before enabling upload.
 Step 2 reads dependencies from `/content/OCR/requirements.txt`, so it works
 even when Colab's current directory changes after cloning.
+If Colab reconnects and clears notebook variables, step 3 reuses the verified
+OCR environment. If setup never completed, step 3 prepares and verifies it
+before opening the PDF upload prompt.
 The sample check does not run live OCR; the first PDF upload does. After upload,
 the notebook prints the OCR device, pipeline version, and stage timings above the
 downloaded invoice JSON. Check that the device says `gpu:0` when testing on T4.
