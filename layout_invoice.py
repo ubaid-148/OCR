@@ -22,7 +22,7 @@ ALIASES = {
 
 INVOICE_LABELS = (
     'invoice no','invoice number','inv no','invoice serial','invoice serial no','serial invoice no',
-    'رقم الفاتورة','مسلسل الفاتورة','رقم مسلسل الفاتورة','رقم تسلسل الفاتورة','الرقم التسلسلي للفاتورة',
+    'رقم الفاتورة','مسلسل الفاتورة','تسلسل الفاتورة','رقم مسلسل الفاتورة','رقم تسلسل الفاتورة','الرقم التسلسلي للفاتورة',
 )
 DATE_LABELS = (
     'date','dated','invoice date','issue date','date and time','التاريخ','تاريخ','تاريخ الفاتورة',
@@ -59,6 +59,9 @@ ADDRESS_FIELDS = (
 
 def numeric(text):
     text = ' '.join(text.translate(DIGIT_TABLE).replace('٬','').replace('٫','.').split())
+    # OCR may append punctuation to an otherwise complete two-decimal cell.
+    # Do not turn malformed decimal strings or a bare trailing dot into money.
+    text = re.sub(r'^(\d+[.,]\d{2})\.$',r'\1',text)
     text = re.sub(r'(?<=\d),(?=\d{3}(?:[, .]|$))','',text).replace(',','.')
     m = re.fullmatch(r'\s*[:#]?\s*([0-9]+(?:\.[0-9]+)?)\s*(?:PCS?|SET|SETS|KG|M|LTR|SAR|USD|AED|ريال|#)?\s*',text,re.I)
     return float(m[1]) if m else None
@@ -624,7 +627,9 @@ def parse_layout(pages,filename,language):
                        name_text(customer_tail(w['text']))),None)
         nearby=[w for w in words if w is not buyer and y(buyer)-h<y(w)<min(name_end,y(buyer)+h*6) and name_text(w['text'])]
         company_like=[w for w in nearby if contains(w['text'],('company','trading','establishment','contracting','شركة','مؤسسة','مؤسسه','مقاولات'))]
-        buyer_name=explicit or min(company_like or nearby,key=lambda w:(
+        embedded=customer_tail(buyer['text'])
+        embedded_name=buyer if embedded!=buyer['text'].strip(' :') and name_text(embedded) else None
+        buyer_name=embedded_name or explicit or min(company_like or nearby,key=lambda w:(
             w.get('retry_kind')!='customer_name_ar',abs(y(w)-y(buyer))>h,
             -len(w['text'].split()),abs(y(w)-y(buyer)),
             abs(center(w)[0]-center(buyer)[0])),default=None)
