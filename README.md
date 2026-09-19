@@ -62,10 +62,28 @@ the OCR result flow remains the same but takes longer.
 Focused retries now reread faint customer names and item descriptions from both
 enhanced and original crops. A numeric item row without a readable description
 triggers a table reread; a failed crop is reported while other retries continue.
-It runs PaddleOCR with focused retries, followed by the spatial invoice parser and validation (`invoice_result.py`). The result contains invoice identity, supplier/customer, real table rows, totals, and short deduplicated review notes. Raw evidence and repeated arithmetic diagnostics are not printed. Unreadable quantities remain null; they are never inferred by dividing totals.
+Default `EXTRACTION_MODE="auto"` runs PaddleOCR with focused retries, then reads
+every original PDF page with a local vision model. The existing spatial parser
+provides independent evidence and a fallback. Image readings are checked against
+OCR, row order/count and arithmetic; disagreement stays flagged for review.
+No per-supplier template selection is required. This does not guarantee correct
+reading of every layout, scan or long table.
+
+Step 2 prepares Ollama and `qwen3-vl:4b` in Colab. Initial setup downloads the
+model; subsequent uploads reuse it. Installation follows the
+[official Linux instructions](https://docs.ollama.com/linux). GPU is recommended;
+vision inference adds time beyond the OCR timings. `fast` explicitly selects the
+previous OCR-only path. Setup failures stop with an error; inference failures
+retain the spatial result with a review note. Output prints extraction mode,
+actual parser, AI status and separate extraction timings.
+
+The compact JSON keeps the same invoice/customer/item/totals schema. Raw OCR and
+the full extraction decision are saved in `*-diagnostics.json`; enable
+`DOWNLOAD_DIAGNOSTICS` to download it. Unreadable quantities remain null and are
+never inferred by dividing totals.
 Missing or uncertain fields remain flagged for review. There are no comparison,
 benchmark, raw-evidence display, or optional model setup cells in this flow.
-The web application's optional full-page vision flow is separate.
+Colab now uses the same checked image-reading flow as the web application.
 
 Cell 1 uses `PROJECT_REF=main`. Reopen this updated notebook;
 if your existing runtime has a clone of another branch, use a fresh runtime.
