@@ -7,22 +7,22 @@ from invoice_formatter import DIGIT_TABLE, center, contains, has_arabic, normali
 from document_regions import invoice_words
 
 ALIASES = {
-    'description': ('item description','description','product','product description','وصف','الوصف','البيان','اسم الصنف','وصف الصنف'),
+    'description': ('nature of goods or services','طبيعة البضائع والخدمات','طبيعة السلع أو الخدمات','item name','item description','اسم السلعة','description','product','product description','وصف','الوصف','البيان','اسم الصنف','وصف الصنف'),
     'quantity': ('quantity','qty','الكمية','كمية'),
     'unit_price': ('unit price','rate','price','price per unit','السعر','سعر الوحدة','سعر افرادي','سعر أفرادي','سعر الوحدة بدون الضريبة'),
-    'amount': ('taxable value','taxable amount','taxable','line amount','net amount','amount','total','القيمة الخاضعة','المبلغ الخاضع','المبلغ الخاضع للضريبة','الاجمالي','الإجمالي'),
-    'item_code': ('item code','item id','item no','sku','product code','material code','رمز الصنف','رقم الصنف','كود الصنف','رقم المنتج','كود المنتج','رقم المادة','كود المادة'),
+    'amount': ('item price','taxable value','taxable amount','taxable','line amount','net amount','amount','total','القيمة الخاضعة','المبلغ الخاضع','المبلغ الخاضع للضريبة','الاجمالي','الإجمالي'),
+    'item_code': ('product no','item code','item id','item no','sku','product code','material code','رمز الصنف','رقم الصنف','كود الصنف','رقم المنتج','كود المنتج','رقم المادة','كود المادة'),
     'serial': ('s no','sn','الرقم','مسلسل'),
     'unit': ('uom','unit','الوحدة'),
-    'vat_amount': ('vat amount','tax amount','vat','الضريبة','قيمة الضريبة','قيمة الضريبية','مبلغ الضريبة'),
+    'vat_amount': ('tax','ضريبة','vat amount','tax amount','vat','الضريبة','قيمة الضريبة','قيمة الضريبية','مبلغ الضريبة'),
     'vat_rate': ('tax rate','vat rate','نسبة الضريبة','نسبة ضريبة القيمة المضافة'),
     'discount': ('discount','خصم'),
-    'gross_amount': ('item subtotal','including vat','total including vat','المجموع شامل الضريبة','الإجمالي شامل الضريبة','المبلغ شامل الضريبة'),
+    'gross_amount': ('incl vat','item subtotal','including vat','total including vat','المجموع شامل الضريبة','الإجمالي شامل الضريبة','المبلغ شامل الضريبة'),
 }
 
 INVOICE_LABELS = (
     'invoice no','invoice number','inv no','invoice serial','invoice serial no','serial invoice no',
-    'رقم الفاتورة','مسلسل الفاتورة','تسلسل الفاتورة','تسلسلالفاتورة','رقم مسلسل الفاتورة','رقم تسلسل الفاتورة','الرقم التسلسلي للفاتورة',
+    'رقم الفاتورة','فاتورة رقم','مسلسل الفاتورة','تسلسل الفاتورة','تسلسلالفاتورة','رقم مسلسل الفاتورة','رقم تسلسل الفاتورة','الرقم التسلسلي للفاتورة',
 )
 DATE_LABELS = (
     'date','dated','invoice date','issue date','date and time','التاريخ','تاريخ','تاريخ الفاتورة',
@@ -63,7 +63,7 @@ def numeric(text):
     # Do not turn malformed decimal strings or a bare trailing dot into money.
     text = re.sub(r'^(\d+[.,]\d{2})\.$',r'\1',text)
     text = re.sub(r'(?<=\d),(?=\d{3}(?:[, .]|$))','',text).replace(',','.')
-    m = re.fullmatch(r'\s*[:#]?\s*([0-9]+(?:\.[0-9]+)?)\s*(?:PCS?|SET|SETS|KG|M|LTR|SAR|USD|AED|ريال|#)?\s*',text,re.I)
+    m = re.fullmatch(r'\s*[:#]?\s*([0-9]+(?:\.[0-9]+)?)\s*(?:PCS?|SET|SETS|KG|M|LTR|BAG|DRM|GAL|EA|SAR|USD|AED|ريال|#)?\s*',text,re.I)
     return float(m[1]) if m else None
 
 
@@ -295,6 +295,12 @@ def table(words):
         # four text lines. Three median glyph heights can split one header row.
         band=[w for w in words if abs(y(w)-y(q))<=5*h]
         headers={}
+        def tax_amount_fragment(word):
+            if normalize(word['text']).casefold().strip(' .:') != 'amount':
+                return False
+            return any(normalize(peer['text']).casefold().strip(' .:') in ('tax','vat')
+                       and 0 < y(word)-y(peer) < h*1.5
+                       and abs(column_x(word)-column_x(peer)) < h*1.5 for peer in band)
         for key,aliases in ALIASES.items():
             choices=[w for w in band if header_match(w['text'],aliases)]
             if key=='item_code' and not choices:
@@ -310,12 +316,23 @@ def table(words):
             if key=='unit_price':
                 choices=[w for w in choices if not contains(w['text'],('tax rate',))]
             if key=='vat_amount':
-                choices=[w for w in choices if not contains(w['text'],('tax rate','vat rate','without vat','including vat','شامل الضريبة','بدون الضريبة','نسبة الضريبة'))
+                choices += [w for w in band if tax_amount_fragment(w) and w not in choices]
+                choices=[w for w in choices if not contains(w['text'],('tax code','vat code','رمز الضريبة','tax rate','vat rate','without vat','including vat','شامل الضريبة','بدون الضريبة','نسبة الضريبة'))
                          and not (header_match(w['text'],ALIASES['amount']) and
-                                  not contains(w['text'],('vat amount','tax amount','مبلغ الضريبة','قيمة الضريبة')))]
+                                  not contains(w['text'],('vat amount','tax amount','مبلغ الضريبة','قيمة الضريبة')) and not tax_amount_fragment(w))]
             if key=='amount':
-                choices=[w for w in choices if not contains(w['text'],('vat amount','tax amount','total with vat','total including vat','total (excl) vat',
+                choices=[w for w in choices if not tax_amount_fragment(w) and not contains(w['text'],('vat amount','tax amount','total with vat','total including vat','total (excl) vat',
                                                                  'مبلغ الضريبة','قيمة الضريبة','شامل الضريبة'))]
+            if key == 'amount':
+                # Explicit taxable headings outrank generic 'Amount', including
+                # focused OCR fragments from a neighbouring tax column.
+                explicit=[w for w in choices if contains(w['text'],('taxable','القيمة الخاضعة','المبلغ الخاضع'))]
+                if explicit:
+                    choices=explicit
+                else:
+                    direct=[w for w in choices if normalize(w['text']).casefold().strip(' .:') in ('amount','item price','line amount')]
+                    if direct:
+                        choices=direct
             headers[key]=min(choices,key=lambda w:_header_rank(key,w,q,y),default=None)
         if not all(headers[k] for k in ('description','quantity','unit_price','amount')):
             continue
@@ -373,7 +390,7 @@ def table(words):
                 # Only use a genuinely separate column, and require a code-like
                 # token rather than a plain monetary/quantity value.
                 known_numeric=('quantity','unit_price','amount','vat_amount','discount','gross_amount','vat_rate')
-                code=min((w for w in code_candidates if w['left']<headers['description']['left'] and
+                code=min((w for w in code_candidates if w['left']+w['width']<=headers['description']['left'] and
                            column_x(w)>hx.get('serial',-float('inf'))+h*.5 and
                            all(abs(column_x(w)-hx[key])>tolerance(key) for key in known_numeric if key in hx) and
                            (bool(re.search(r'[A-Za-z]',normalize(w['text']))) or
@@ -592,13 +609,13 @@ def parse_layout(pages,filename,language):
         inv=keep('invoice.invoice_number',chosen,normalize(chosen['text']))
     for w in words:
         if inv is not None:break
-        if contains(w['text'],INVOICE_LABELS) or re.fullmatch(r'(?i)(?:invoice|inv\.?)\s*#(?:\s*[A-Za-z0-9/-]+)?', w['text'].strip()):
+        if contains(w['text'],INVOICE_LABELS) or re.fullmatch(r'(?i)(?:invoice|inv\.?)\s*#\s*:?(?:\s*[A-Za-z0-9/#-]+)?', w['text'].strip()):
             m=re.search(r'(?:[:#]\s*|\b)([A-Za-z]+[-/][A-Za-z0-9/-]*\d[A-Za-z0-9/-]*|\d{3,})\s*$',normalize(w['text']))
-            value=near(w,lambda s:bool(re.fullmatch(r'[A-Za-z0-9/-]*\d[A-Za-z0-9/-]*',normalize(s).lstrip(':# '))) and number_string(s,{15}) is None and not re.fullmatch(r'\d{1,4}[-/]\d{1,2}[-/]\d{2,4}',normalize(s)))
+            value=near(w,lambda s:bool(re.fullmatch(r'[A-Za-z0-9/#-]*\d[A-Za-z0-9/#-]*',normalize(s).lstrip(':# '))) and number_string(s,{15}) is None and not re.fullmatch(r'\d{1,4}[-/]\d{1,2}[-/]\d{2,4}',normalize(s)))
             if m: inv=keep('invoice.invoice_number',w,m[1]);break
             if value and (value.get('source') == 'native_text' or float(value.get('confidence') or 0) >= 80):
                 inv=keep('invoice.invoice_number',value,normalize(value['text']).lstrip(':# '));break
-    pattern=r'\b(?:\d{1,2}[-/]\d{1,2}[-/]20\d{2}|20\d{2}[-/]\d{1,2}[-/]\d{1,2})\b'
+    pattern=r'(?i)\b(?:\d{1,2}[-/]\d{1,2}[-/]20\d{2}|20\d{2}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}\s+(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+20\d{2})\b'
     for w in words:
         if w.get('retry_kind')=='date':
             date=keep('invoice.date',w,w['text'])

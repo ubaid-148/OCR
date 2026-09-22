@@ -1,0 +1,696 @@
+{
+  "pages": [
+    {
+      "page": 1,
+      "render_dpi": 200,
+      "width": 595.260009765625,
+      "height": 841.8599853515625,
+      "canonical_width": 1654,
+      "canonical_height": 2339,
+      "words": [
+        {
+          "text": "V",
+          "confidence": 25.12,
+          "left": 782.0,
+          "top": 137.0,
+          "width": 96.0,
+          "height": 69.0
+        },
+        {
+          "text": "مؤسسة محمد خالد ابراهيم الجمعان للادوات الكهربائية",
+          "confidence": 95.12,
+          "left": 598.0,
+          "top": 254.0,
+          "width": 463.0,
+          "height": 34.0
+        },
+        {
+          "text": "AL JAMAAN ELECTRICALS",
+          "confidence": 99.63,
+          "left": 601.0,
+          "top": 293.0,
+          "width": 463.0,
+          "height": 40.0
+        },
+        {
+          "text": "فاتورة ضريية",
+          "confidence": 96.37,
+          "left": 785.0,
+          "top": 343.0,
+          "width": 125.0,
+          "height": 39.0
+        },
+        {
+          "text": "Tax Invoice",
+          "confidence": 97.14,
+          "left": 779.0,
+          "top": 396.0,
+          "width": 135.0,
+          "height": 34.0
+        },
+        {
+          "text": "Invoice#:",
+          "confidence": 99.86,
+          "left": 109.0,
+          "top": 551.0,
+          "width": 84.0,
+          "height": 29.0
+        },
+        {
+          "text": "JE-INV-000505",
+          "confidence": 99.81,
+          "left": 358.0,
+          "top": 552.0,
+          "width": 128.0,
+          "height": 24.0
+        },
+        {
+          "text": "فاتورة رقم",
+          "confidence": 95.24,
+          "left": 761.0,
+          "top": 546.0,
+          "width": 84.0,
+          "height": 41.0
+        },
+        {
+          "text": "Invoice Issue Date:",
+          "confidence": 99.96,
+          "left": 110.0,
+          "top": 595.0,
+          "width": 158.0,
+          "height": 24.0
+        },
+        {
+          "text": "10 Mar 2026 02-04-2626",
+          "confidence": 91.79,
+          "left": 356.0,
+          "top": 587.0,
+          "width": 288.0,
+          "height": 42.0
+        },
+        {
+          "text": "تاريخ إصدار الفاتورة",
+          "confidence": 91.44,
+          "left": 694.0,
+          "top": 590.0,
+          "width": 152.0,
+          "height": 36.0
+        },
+        {
+          "text": "Due Date:",
+          "confidence": 94.98,
+          "left": 109.0,
+          "top": 633.0,
+          "width": 93.0,
+          "height": 29.0
+        },
+        {
+          "text": "10 Mar 2026",
+          "confidence": 97.0,
+          "left": 360.0,
+          "top": 635.0,
+          "width": 107.0,
+          "height": 24.0
+        },
+        {
+          "text": "تاريخ الاستحقاق",
+          "confidence": 92.61,
+          "left": 725.0,
+          "top": 633.0,
+          "width": 122.0,
+          "height": 32.0
+        },
+        {
+          "text": "Torms:",
+          "confidence": 99.51,
+          "left": 106.0,
+          "top": 671.0,
+          "width": 76.0,
+          "height": 34.0
+        },
+        {
+          "text": "Duc-on Rcecipt",
+          "confidence": 92.11,
+          "left": 355.0,
+          "top": 672.0,
+          "width": 136.0,
+          "height": 34.0
+        },
+        {
+          "text": "الشروط",
+          "confidence": 96.56,
+          "left": 776.0,
+          "top": 670.0,
+          "width": 74.0,
+          "height": 38.0
+        },
+        {
+          "text": "Scller:",
+          "confidence": 84.87,
+          "left": 109.0,
+          "top": 826.0,
+          "width": 63.0,
+          "height": 26.0
+        },
+        {
+          "text": ":Buyerالمورة",
+          "confidence": 87.4,
+          "left": 787.0,
+          "top": 824.0,
+          "width": 129.0,
+          "height": 30.0
+        },
+        {
+          "text": "ESTABLISHMENT MOHAMMED",
+          "confidence": 99.72,
+          "left": 111.0,
+          "top": 868.0,
+          "width": 290.0,
+          "height": 23.0
+        },
+        {
+          "text": "مؤسسة محمد خالد إيراهيم الجمعان للادوات",
+          "confidence": 91.87,
+          "left": 549.0,
+          "top": 867.0,
+          "width": 300.0,
+          "height": 27.0
+        },
+        {
+          "text": "ALI MOHAMMED AL-REBAH EST",
+          "confidence": 99.08,
+          "left": 849.0,
+          "top": 867.0,
+          "width": 310.0,
+          "height": 23.0
+        },
+        {
+          "text": "TRN 300402905100003",
+          "confidence": 99.97,
+          "left": 1393.0,
+          "top": 867.0,
+          "width": 191.0,
+          "height": 21.0
+        },
+        {
+          "text": "KHALID ABRAHIM AL-JAMAAN FOR",
+          "confidence": 97.04,
+          "left": 113.0,
+          "top": 906.0,
+          "width": 336.0,
+          "height": 23.0
+        },
+        {
+          "text": "الكهربائية",
+          "confidence": 91.83,
+          "left": 770.0,
+          "top": 903.0,
+          "width": 79.0,
+          "height": 32.0
+        },
+        {
+          "text": "3518",
+          "confidence": 99.96,
+          "left": 851.0,
+          "top": 904.0,
+          "width": 51.0,
+          "height": 26.0
+        },
+        {
+          "text": "ELECTRICAL TOOLS",
+          "confidence": 99.96,
+          "left": 112.0,
+          "top": 944.0,
+          "width": 192.0,
+          "height": 24.0
+        },
+        {
+          "text": "34217",
+          "confidence": 99.96,
+          "left": 785.0,
+          "top": 941.0,
+          "width": 62.0,
+          "height": 29.0
+        },
+        {
+          "text": "THIRTEENTH",
+          "confidence": 99.87,
+          "left": 856.0,
+          "top": 945.0,
+          "width": 124.0,
+          "height": 21.0
+        },
+        {
+          "text": "6973",
+          "confidence": 99.98,
+          "left": 112.0,
+          "top": 981.0,
+          "width": 48.0,
+          "height": 28.0
+        },
+        {
+          "text": "المملكة العريية السعودية",
+          "confidence": 96.09,
+          "left": 667.0,
+          "top": 979.0,
+          "width": 181.0,
+          "height": 33.0
+        },
+        {
+          "text": "AL KHOBAR",
+          "confidence": 99.61,
+          "left": 853.0,
+          "top": 983.0,
+          "width": 121.0,
+          "height": 24.0
+        },
+        {
+          "text": "KING SAUD ROAD, 9TH STREET",
+          "confidence": 99.27,
+          "left": 113.0,
+          "top": 1021.0,
+          "width": 296.0,
+          "height": 25.0
+        },
+        {
+          "text": "TRN 312353535600003",
+          "confidence": 99.97,
+          "left": 649.0,
+          "top": 1022.0,
+          "width": 193.0,
+          "height": 21.0
+        },
+        {
+          "text": "34623 34623",
+          "confidence": 99.95,
+          "left": 853.0,
+          "top": 1021.0,
+          "width": 111.0,
+          "height": 24.0
+        },
+        {
+          "text": "AL KHOBAR Ash Sharqiyah 34217",
+          "confidence": 97.14,
+          "left": 115.0,
+          "top": 1061.0,
+          "width": 291.0,
+          "height": 24.0
+        },
+        {
+          "text": "Saudi Arabia",
+          "confidence": 93.29,
+          "left": 856.0,
+          "top": 1059.0,
+          "width": 109.0,
+          "height": 25.0
+        },
+        {
+          "text": "Saudi Arabia",
+          "confidence": 96.22,
+          "left": 114.0,
+          "top": 1100.0,
+          "width": 109.0,
+          "height": 24.0
+        },
+        {
+          "text": "TRN 300402905100003",
+          "confidence": 99.95,
+          "left": 857.0,
+          "top": 1098.0,
+          "width": 193.0,
+          "height": 24.0
+        },
+        {
+          "text": "TRN 312353535600003",
+          "confidence": 99.95,
+          "left": 114.0,
+          "top": 1139.0,
+          "width": 193.0,
+          "height": 21.0
+        },
+        {
+          "text": "1 ioe Iterus:",
+          "confidence": 84.4,
+          "left": 110.0,
+          "top": 1229.0,
+          "width": 103.0,
+          "height": 34.0
+        },
+        {
+          "text": "Item Subtotal (Including",
+          "confidence": 96.85,
+          "left": 1382.0,
+          "top": 1282.0,
+          "width": 204.0,
+          "height": 29.0
+        },
+        {
+          "text": "VAT)",
+          "confidence": 94.73,
+          "left": 1455.0,
+          "top": 1322.0,
+          "width": 57.0,
+          "height": 27.0
+        },
+        {
+          "text": "#",
+          "confidence": 97.6,
+          "left": 134.0,
+          "top": 1346.0,
+          "width": 20.0,
+          "height": 23.0
+        },
+        {
+          "text": "Nature of goods or services",
+          "confidence": 98.54,
+          "left": 331.0,
+          "top": 1342.0,
+          "width": 225.0,
+          "height": 30.0
+        },
+        {
+          "text": "Unit Price",
+          "confidence": 99.68,
+          "left": 746.0,
+          "top": 1342.0,
+          "width": 91.0,
+          "height": 27.0
+        },
+        {
+          "text": "Quantity",
+          "confidence": 94.81,
+          "left": 917.0,
+          "top": 1344.0,
+          "width": 75.0,
+          "height": 27.0
+        },
+        {
+          "text": "Taxable Amount",
+          "confidence": 99.84,
+          "left": 1054.0,
+          "top": 1340.0,
+          "width": 141.0,
+          "height": 30.0
+        },
+        {
+          "text": "Tax",
+          "confidence": 99.84,
+          "left": 1271.0,
+          "top": 1342.0,
+          "width": 41.0,
+          "height": 29.0
+        },
+        {
+          "text": "الإجمالي الفرعي للصنف",
+          "confidence": 96.8,
+          "left": 1399.0,
+          "top": 1359.0,
+          "width": 171.0,
+          "height": 36.0
+        },
+        {
+          "text": "طبيعة البضائع والخدمات",
+          "confidence": 93.68,
+          "left": 359.0,
+          "top": 1379.0,
+          "width": 175.0,
+          "height": 34.0
+        },
+        {
+          "text": "سعر الوحدة",
+          "confidence": 99.44,
+          "left": 746.0,
+          "top": 1377.0,
+          "width": 89.0,
+          "height": 37.0
+        },
+        {
+          "text": "الكمية",
+          "confidence": 99.55,
+          "left": 925.0,
+          "top": 1377.0,
+          "width": 58.0,
+          "height": 33.0
+        },
+        {
+          "text": "المبلغ الخاضع للضريبة",
+          "confidence": 94.6,
+          "left": 1040.0,
+          "top": 1377.0,
+          "width": 164.0,
+          "height": 38.0
+        },
+        {
+          "text": "ضريبة",
+          "confidence": 98.36,
+          "left": 1267.0,
+          "top": 1381.0,
+          "width": 50.0,
+          "height": 31.0
+        },
+        {
+          "text": "متضمنًا ضريبة القيمة",
+          "confidence": 90.48,
+          "left": 1406.0,
+          "top": 1398.0,
+          "width": 154.0,
+          "height": 31.0
+        },
+        {
+          "text": "المضافة",
+          "confidence": 87.0,
+          "left": 1449.0,
+          "top": 1435.0,
+          "width": 74.0,
+          "height": 32.0
+        },
+        {
+          "text": "BLOWER ASSAMBLE 3 PHASE RPM 3450 VOLTS 220/380",
+          "confidence": 99.75,
+          "left": 186.0,
+          "top": 1497.0,
+          "width": 505.0,
+          "height": 25.0
+        },
+        {
+          "text": "2,050.00 SAR",
+          "confidence": 99.79,
+          "left": 744.0,
+          "top": 1494.0,
+          "width": 126.0,
+          "height": 30.0
+        },
+        {
+          "text": "1.00",
+          "confidence": 99.92,
+          "left": 985.0,
+          "top": 1496.0,
+          "width": 50.0,
+          "height": 29.0
+        },
+        {
+          "text": "2,050.00",
+          "confidence": 99.63,
+          "left": 1127.0,
+          "top": 1495.0,
+          "width": 82.0,
+          "height": 29.0
+        },
+        {
+          "text": "307.50",
+          "confidence": 99.98,
+          "left": 1303.0,
+          "top": 1495.0,
+          "width": 69.0,
+          "height": 29.0
+        },
+        {
+          "text": "2,357.50 SAR",
+          "confidence": 99.61,
+          "left": 1465.0,
+          "top": 1494.0,
+          "width": 126.0,
+          "height": 30.0
+        },
+        {
+          "text": "HZ 50/60",
+          "confidence": 98.89,
+          "left": 183.0,
+          "top": 1532.0,
+          "width": 88.0,
+          "height": 33.0
+        },
+        {
+          "text": "pcs",
+          "confidence": 94.92,
+          "left": 996.0,
+          "top": 1535.0,
+          "width": 38.0,
+          "height": 29.0
+        },
+        {
+          "text": "15.00%",
+          "confidence": 98.19,
+          "left": 1303.0,
+          "top": 1533.0,
+          "width": 67.0,
+          "height": 26.0
+        },
+        {
+          "text": "G-E",
+          "confidence": 68.79,
+          "left": 573.0,
+          "top": 1569.0,
+          "width": 143.0,
+          "height": 54.0
+        },
+        {
+          "text": "Total Amount:",
+          "confidence": 97.65,
+          "left": 112.0,
+          "top": 1628.0,
+          "width": 128.0,
+          "height": 27.0
+        },
+        {
+          "text": "الإجمالي الخاضع للضريبة غير شامل ضريبة",
+          "confidence": 86.8,
+          "left": 1107.0,
+          "top": 1667.0,
+          "width": 298.0,
+          "height": 31.0
+        },
+        {
+          "text": "Total Taxable Amount(Excluding VAT)",
+          "confidence": 99.61,
+          "left": 671.0,
+          "top": 1687.0,
+          "width": 323.0,
+          "height": 27.0
+        },
+        {
+          "text": "2,050.00 SAR",
+          "confidence": 96.97,
+          "left": 1468.0,
+          "top": 1684.0,
+          "width": 124.0,
+          "height": 30.0
+        },
+        {
+          "text": "القيمة المضافة",
+          "confidence": 97.34,
+          "left": 1297.0,
+          "top": 1704.0,
+          "width": 108.0,
+          "height": 31.0
+        },
+        {
+          "text": "Total VAT",
+          "confidence": 99.78,
+          "left": 671.0,
+          "top": 1748.0,
+          "width": 94.0,
+          "height": 25.0
+        },
+        {
+          "text": "مجموع ضريبة القيمة المضافة",
+          "confidence": 96.94,
+          "left": 1198.0,
+          "top": 1745.0,
+          "width": 205.0,
+          "height": 33.0
+        },
+        {
+          "text": "307.50 SAR",
+          "confidence": 99.77,
+          "left": 1487.0,
+          "top": 1745.0,
+          "width": 108.0,
+          "height": 28.0
+        },
+        {
+          "text": "Total Amount Due",
+          "confidence": 99.62,
+          "left": 671.0,
+          "top": 1788.0,
+          "width": 156.0,
+          "height": 27.0
+        },
+        {
+          "text": "إجمالي المبلغ المستحق",
+          "confidence": 95.89,
+          "left": 1240.0,
+          "top": 1786.0,
+          "width": 166.0,
+          "height": 35.0
+        },
+        {
+          "text": "2,357.50 SAR",
+          "confidence": 97.77,
+          "left": 1470.0,
+          "top": 1785.0,
+          "width": 125.0,
+          "height": 30.0
+        },
+        {
+          "text": "Saudi Riyal Two Thousand Three Hundred Fifty-Seven and Fify",
+          "confidence": 97.16,
+          "left": 143.0,
+          "top": 1828.0,
+          "width": 518.0,
+          "height": 28.0
+        },
+        {
+          "text": "Total In Words:",
+          "confidence": 99.24,
+          "left": 671.0,
+          "top": 1847.0,
+          "width": 134.0,
+          "height": 28.0
+        },
+        {
+          "text": "ريال سعودي ألفين وثلاثة مائة وسبعة وخسون بالإضافة إلى خسون هللة",
+          "confidence": 89.07,
+          "left": 1043.0,
+          "top": 1843.0,
+          "width": 502.0,
+          "height": 35.0
+        },
+        {
+          "text": "Halalas",
+          "confidence": 99.83,
+          "left": 595.0,
+          "top": 1867.0,
+          "width": 69.0,
+          "height": 26.0
+        },
+        {
+          "text": "()",
+          "confidence": 87.56,
+          "left": 106.0,
+          "top": 2018.0,
+          "width": 28.0,
+          "height": 29.0
+        },
+        {
+          "text": "Thanks for your business.",
+          "confidence": 96.66,
+          "left": 107.0,
+          "top": 2071.0,
+          "width": 142.0,
+          "height": 20.0
+        },
+        {
+          "text": "02-04-2626",
+          "confidence": 88.26,
+          "left": 467.5,
+          "top": 588.1,
+          "width": 177.5,
+          "height": 41.0,
+          "source": "targeted_ocr",
+          "retry_kind": "date"
+        }
+      ]
+    }
+  ]
+}

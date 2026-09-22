@@ -6,14 +6,15 @@ model download or vision generation. Experimental `auto` remains opt-in.
 
 ## Checks performed
 
-75 focused regression tests passed, including batch resume/failure handling. All 111 saved
+102 focused regression tests passed, including batch resume/failure handling. All 111 saved
 OCR documents were replayed without exceptions. This is cached recognition data,
 not a fresh GPU run or a manually labelled accuracy benchmark.
 
 | Cached parser check | Before | After |
 | --- | ---: | ---: |
-| Invoice number present | 72/111 | 74/111 |
-| Three arithmetic checks pass | 13/111 | 13/111 |
+| Invoice number present | 74/111 | 88/111 |
+| Documents with items | 71/111 | 88/111 |
+| Three arithmetic checks pass | 13/111 | 20/111 |
 | Parser exceptions | 0 | 0 |
 
 `9479` and `9675` now recognize the explicit `Invoice #` label. No previously
@@ -26,10 +27,18 @@ notes, other labelled fields and bank details that were previously dropped at
 the output boundary. This preserves extracted values; it does not recover words
 that OCR never recognized.
 
+Additional table rules recognize Item Name and Nature of Goods headers, keep long
+descriptions out of inferred item-code columns, and distinguish stacked Tax Amount
+from taxable amounts and tax codes. Known unit suffixes such as EA and BAG are
+accepted in numeric cells. English month dates and additional invoice labels are
+recognized. Recovered values for 9515 and 9522 were checked against page images.
+No previously populated item table or invoice number was lost, and no previously
+passing arithmetic check regressed in this replay. Presence is not accuracy.
+
 ## Known limits
 
-The cached set still has 37 missing invoice numbers, 43 missing dates, 40 documents
-without extracted items, and 61 missing net amounts. Old raw OCR may lack the newer
+The cached set still has 23 missing invoice numbers, 28 missing dates, 23 documents
+without extracted items, and 53 missing net amounts. Old raw OCR may lack the newer
 focused rereads, so fresh recognition must be measured before judging current
 end-to-end coverage. On cached `9479`, the first VAT is misread as 17.05 rather than
 7.05. The source reading remains visible and the result requires review; it is

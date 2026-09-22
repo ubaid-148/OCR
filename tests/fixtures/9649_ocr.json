@@ -1,0 +1,1040 @@
+{
+  "pages": [
+    {
+      "page": 1,
+      "render_dpi": 200,
+      "width": 595.260009765625,
+      "height": 841.8599853515625,
+      "canonical_width": 1654,
+      "canonical_height": 2339,
+      "words": [
+        {
+          "text": "E",
+          "confidence": 36.99,
+          "left": 910.0,
+          "top": 179.0,
+          "width": 10.0,
+          "height": 10.0
+        },
+        {
+          "text": "مؤسسة سهم العبور للتجارة",
+          "confidence": 96.69,
+          "left": 1144.0,
+          "top": 210.0,
+          "width": 234.0,
+          "height": 33.0
+        },
+        {
+          "text": "Arrow Cross Trading Est",
+          "confidence": 99.82,
+          "left": 81.0,
+          "top": 220.0,
+          "width": 321.0,
+          "height": 36.0
+        },
+        {
+          "text": "طريق الظهران",
+          "confidence": 99.43,
+          "left": 1240.0,
+          "top": 239.0,
+          "width": 138.0,
+          "height": 34.0
+        },
+        {
+          "text": "Adh Dhahran",
+          "confidence": 99.28,
+          "left": 83.0,
+          "top": 254.0,
+          "width": 164.0,
+          "height": 28.0
+        },
+        {
+          "text": "رقم المبنىالمدينة ٤الخب",
+          "confidence": 76.98,
+          "left": 1081.0,
+          "top": 268.0,
+          "width": 297.0,
+          "height": 34.0
+        },
+        {
+          "text": "Building No.,City : 4889,AI Khobar",
+          "confidence": 95.87,
+          "left": 83.0,
+          "top": 279.0,
+          "width": 419.0,
+          "height": 34.0
+        },
+        {
+          "text": "الحي،الرمز البريديحي الخبر الجنوبية،٣٤٦٢١",
+          "confidence": 86.91,
+          "left": 935.0,
+          "top": 298.0,
+          "width": 443.0,
+          "height": 36.0
+        },
+        {
+          "text": "District, Postal Code : Al Khubar Al Janubiyah Dist,34621",
+          "confidence": 95.26,
+          "left": 83.0,
+          "top": 307.0,
+          "width": 533.0,
+          "height": 37.0
+        },
+        {
+          "text": "D-Connect",
+          "confidence": 99.39,
+          "left": 631.0,
+          "top": 324.0,
+          "width": 93.0,
+          "height": 24.0
+        },
+        {
+          "text": "Ie enolltions",
+          "confidence": 43.48,
+          "left": 631.0,
+          "top": 337.0,
+          "width": 93.0,
+          "height": 26.0
+        },
+        {
+          "text": "ولاية،البلدالمملكة العربية السعودية",
+          "confidence": 84.37,
+          "left": 863.0,
+          "top": 329.0,
+          "width": 517.0,
+          "height": 36.0
+        },
+        {
+          "text": "Region,Country : Ash-Sharqiyyah,Saudi Arabia",
+          "confidence": 98.15,
+          "left": 84.0,
+          "top": 337.0,
+          "width": 537.0,
+          "height": 38.0
+        },
+        {
+          "text": "رقم ضريبة القيمة المضافة٣١٢٩٥٧٢٠٠٠٣",
+          "confidence": 77.23,
+          "left": 911.0,
+          "top": 362.0,
+          "width": 468.0,
+          "height": 27.0
+        },
+        {
+          "text": "VAT No. : 310209577200003",
+          "confidence": 99.55,
+          "left": 84.0,
+          "top": 370.0,
+          "width": 348.0,
+          "height": 32.0
+        },
+        {
+          "text": "بيانات اال٣٣",
+          "confidence": 55.57,
+          "left": 1003.0,
+          "top": 387.0,
+          "width": 378.0,
+          "height": 35.0
+        },
+        {
+          "text": "Contact : 0138333410",
+          "confidence": 99.7,
+          "left": 85.0,
+          "top": 400.0,
+          "width": 266.0,
+          "height": 34.0
+        },
+        {
+          "text": "رقم السجل التجاري٢٥١٢٣١٦٤٤",
+          "confidence": 76.67,
+          "left": 1040.0,
+          "top": 421.0,
+          "width": 340.0,
+          "height": 30.0
+        },
+        {
+          "text": "Commercial Registration No.: 2051231644",
+          "confidence": 98.98,
+          "left": 84.0,
+          "top": 427.0,
+          "width": 410.0,
+          "height": 37.0
+        },
+        {
+          "text": "Tax Invoice",
+          "confidence": 99.85,
+          "left": 639.0,
+          "top": 513.0,
+          "width": 174.0,
+          "height": 34.0
+        },
+        {
+          "text": "فاتورة ضريبية",
+          "confidence": 95.9,
+          "left": 645.0,
+          "top": 543.0,
+          "width": 160.0,
+          "height": 43.0
+        },
+        {
+          "text": "Invoice No.",
+          "confidence": 99.97,
+          "left": 550.0,
+          "top": 584.0,
+          "width": 138.0,
+          "height": 33.0
+        },
+        {
+          "text": ": 34063",
+          "confidence": 93.31,
+          "left": 785.0,
+          "top": 584.0,
+          "width": 102.0,
+          "height": 29.0
+        },
+        {
+          "text": "المشتري",
+          "confidence": 99.88,
+          "left": 1303.0,
+          "top": 574.0,
+          "width": 82.0,
+          "height": 40.0
+        },
+        {
+          "text": "Buyer",
+          "confidence": 99.93,
+          "left": 85.0,
+          "top": 591.0,
+          "width": 77.0,
+          "height": 33.0
+        },
+        {
+          "text": "raرقم الفاتورة",
+          "confidence": 89.51,
+          "left": 82.0,
+          "top": 611.0,
+          "width": 578.0,
+          "height": 43.0
+        },
+        {
+          "text": "٣٤٠٦٣",
+          "confidence": 78.91,
+          "left": 795.0,
+          "top": 611.0,
+          "width": 88.0,
+          "height": 25.0
+        },
+        {
+          "text": "مؤسسة علي محمد آل ربح للمقاولات العامة",
+          "confidence": 95.28,
+          "left": 1006.0,
+          "top": 608.0,
+          "width": 376.0,
+          "height": 32.0
+        },
+        {
+          "text": "١٣th",
+          "confidence": 80.31,
+          "left": 1323.0,
+          "top": 637.0,
+          "width": 61.0,
+          "height": 31.0
+        },
+        {
+          "text": "13th",
+          "confidence": 99.92,
+          "left": 86.0,
+          "top": 652.0,
+          "width": 60.0,
+          "height": 30.0
+        },
+        {
+          "text": "Ref No.",
+          "confidence": 99.95,
+          "left": 550.0,
+          "top": 647.0,
+          "width": 97.0,
+          "height": 29.0
+        },
+        {
+          "text": "رقم المرجع",
+          "confidence": 97.6,
+          "left": 545.0,
+          "top": 670.0,
+          "width": 114.0,
+          "height": 41.0
+        },
+        {
+          "text": "المدينة،رقم المبني٣٥١",
+          "confidence": 76.87,
+          "left": 1141.0,
+          "top": 666.0,
+          "width": 241.0,
+          "height": 32.0
+        },
+        {
+          "text": "Building No,City",
+          "confidence": 95.84,
+          "left": 87.0,
+          "top": 682.0,
+          "width": 193.0,
+          "height": 28.0
+        },
+        {
+          "text": ":3518,AI Khobar",
+          "confidence": 96.63,
+          "left": 317.0,
+          "top": 679.0,
+          "width": 210.0,
+          "height": 29.0
+        },
+        {
+          "text": "Dated & Time",
+          "confidence": 99.81,
+          "left": 549.0,
+          "top": 704.0,
+          "width": 169.0,
+          "height": 31.0
+        },
+        {
+          "text": ":04-06-2026 10:08:28",
+          "confidence": 97.74,
+          "left": 787.0,
+          "top": 703.0,
+          "width": 140.0,
+          "height": 27.0
+        },
+        {
+          "text": "الرمز البريدي ،الحي٣٤٦٢٣",
+          "confidence": 81.62,
+          "left": 1114.0,
+          "top": 698.0,
+          "width": 268.0,
+          "height": 31.0
+        },
+        {
+          "text": "District, Postal Code: Ath Thuqbha Dist,34623",
+          "confidence": 97.57,
+          "left": 85.0,
+          "top": 707.0,
+          "width": 446.0,
+          "height": 35.0
+        },
+        {
+          "text": "Ash-Sharqiyyah",
+          "confidence": 99.7,
+          "left": 330.0,
+          "top": 737.0,
+          "width": 200.0,
+          "height": 34.0
+        },
+        {
+          "text": "التاريخ & الوقت",
+          "confidence": 99.71,
+          "left": 548.0,
+          "top": 731.0,
+          "width": 150.0,
+          "height": 38.0
+        },
+        {
+          "text": "٤٠٦٢٠١٠٠٨٠٢٨",
+          "confidence": 77.56,
+          "left": 790.0,
+          "top": 730.0,
+          "width": 139.0,
+          "height": 29.0
+        },
+        {
+          "text": "Ash-Sharqiyyah : منطقة",
+          "confidence": 83.13,
+          "left": 1117.0,
+          "top": 726.0,
+          "width": 266.0,
+          "height": 36.0
+        },
+        {
+          "text": "Region",
+          "confidence": 99.94,
+          "left": 85.0,
+          "top": 741.0,
+          "width": 95.0,
+          "height": 32.0
+        },
+        {
+          "text": "البلد المملكة العربية السعودية",
+          "confidence": 95.21,
+          "left": 1106.0,
+          "top": 755.0,
+          "width": 265.0,
+          "height": 34.0
+        },
+        {
+          "text": "Country",
+          "confidence": 99.96,
+          "left": 85.0,
+          "top": 769.0,
+          "width": 102.0,
+          "height": 34.0
+        },
+        {
+          "text": "Saudi Arabia",
+          "confidence": 97.6,
+          "left": 336.0,
+          "top": 769.0,
+          "width": 160.0,
+          "height": 28.0
+        },
+        {
+          "text": "رقم ضريبة القيمة المضافة ٣٠٠٤٠٢٩٠١٠٠٠٠٣",
+          "confidence": 78.86,
+          "left": 942.0,
+          "top": 788.0,
+          "width": 426.0,
+          "height": 27.0
+        },
+        {
+          "text": "VAT No.",
+          "confidence": 99.66,
+          "left": 87.0,
+          "top": 801.0,
+          "width": 105.0,
+          "height": 28.0
+        },
+        {
+          "text": "300402905100003",
+          "confidence": 99.94,
+          "left": 336.0,
+          "top": 798.0,
+          "width": 193.0,
+          "height": 27.0
+        },
+        {
+          "text": ":Saudi Arabia",
+          "confidence": 96.9,
+          "left": 320.0,
+          "top": 826.0,
+          "width": 176.0,
+          "height": 30.0
+        },
+        {
+          "text": "مكان التوريد المملكة العربية السعودية",
+          "confidence": 96.65,
+          "left": 1032.0,
+          "top": 816.0,
+          "width": 339.0,
+          "height": 34.0
+        },
+        {
+          "text": "Place of supply",
+          "confidence": 99.78,
+          "left": 88.0,
+          "top": 830.0,
+          "width": 185.0,
+          "height": 31.0
+        },
+        {
+          "text": ": 8096",
+          "confidence": 96.81,
+          "left": 319.0,
+          "top": 856.0,
+          "width": 86.0,
+          "height": 29.0
+        },
+        {
+          "text": "رقم السجل التجاري٢٠٠٠٦٥٢٠٠",
+          "confidence": 79.62,
+          "left": 1044.0,
+          "top": 847.0,
+          "width": 336.0,
+          "height": 30.0
+        },
+        {
+          "text": "Secondary No.",
+          "confidence": 99.87,
+          "left": 88.0,
+          "top": 857.0,
+          "width": 180.0,
+          "height": 34.0
+        },
+        {
+          "text": "Commercial Registration No.: 2050065200",
+          "confidence": 99.72,
+          "left": 89.0,
+          "top": 885.0,
+          "width": 441.0,
+          "height": 34.0
+        },
+        {
+          "text": "Quantity",
+          "confidence": 99.96,
+          "left": 853.0,
+          "top": 928.0,
+          "width": 85.0,
+          "height": 28.0
+        },
+        {
+          "text": "Rate",
+          "confidence": 99.92,
+          "left": 956.0,
+          "top": 928.0,
+          "width": 60.0,
+          "height": 26.0
+        },
+        {
+          "text": "per",
+          "confidence": 99.92,
+          "left": 1032.0,
+          "top": 926.0,
+          "width": 42.0,
+          "height": 30.0
+        },
+        {
+          "text": "Amount",
+          "confidence": 99.91,
+          "left": 1092.0,
+          "top": 926.0,
+          "width": 94.0,
+          "height": 25.0
+        },
+        {
+          "text": "VAT",
+          "confidence": 99.87,
+          "left": 1221.0,
+          "top": 923.0,
+          "width": 59.0,
+          "height": 29.0
+        },
+        {
+          "text": "Total",
+          "confidence": 99.96,
+          "left": 1312.0,
+          "top": 924.0,
+          "width": 62.0,
+          "height": 26.0
+        },
+        {
+          "text": "SI.No",
+          "confidence": 90.78,
+          "left": 85.0,
+          "top": 934.0,
+          "width": 44.0,
+          "height": 32.0
+        },
+        {
+          "text": "Description of Goods",
+          "confidence": 99.61,
+          "left": 373.0,
+          "top": 932.0,
+          "width": 218.0,
+          "height": 27.0
+        },
+        {
+          "text": "الكمية",
+          "confidence": 99.61,
+          "left": 865.0,
+          "top": 953.0,
+          "width": 58.0,
+          "height": 33.0
+        },
+        {
+          "text": "Incl.VAT",
+          "confidence": 98.29,
+          "left": 1300.0,
+          "top": 952.0,
+          "width": 85.0,
+          "height": 28.0
+        },
+        {
+          "text": "(3)",
+          "confidence": 79.17,
+          "left": 1120.0,
+          "top": 983.0,
+          "width": 41.0,
+          "height": 34.0
+        },
+        {
+          "text": "(3)",
+          "confidence": 67.65,
+          "left": 1232.0,
+          "top": 982.0,
+          "width": 40.0,
+          "height": 34.0
+        },
+        {
+          "text": "(1)",
+          "confidence": 70.21,
+          "left": 1322.0,
+          "top": 981.0,
+          "width": 42.0,
+          "height": 33.0
+        },
+        {
+          "text": "السعر",
+          "confidence": 99.61,
+          "left": 962.0,
+          "top": 1014.0,
+          "width": 53.0,
+          "height": 31.0
+        },
+        {
+          "text": "في",
+          "confidence": 82.02,
+          "left": 1039.0,
+          "top": 1016.0,
+          "width": 32.0,
+          "height": 31.0
+        },
+        {
+          "text": "المبلغ",
+          "confidence": 85.99,
+          "left": 1112.0,
+          "top": 1009.0,
+          "width": 57.0,
+          "height": 39.0
+        },
+        {
+          "text": "ضرية النيمة المضائة",
+          "confidence": 79.12,
+          "left": 1205.0,
+          "top": 1009.0,
+          "width": 94.0,
+          "height": 35.0
+        },
+        {
+          "text": "لمو نلأرية بالفية",
+          "confidence": 46.81,
+          "left": 1296.0,
+          "top": 1009.0,
+          "width": 91.0,
+          "height": 35.0
+        },
+        {
+          "text": "وصف البضانع",
+          "confidence": 99.36,
+          "left": 421.0,
+          "top": 1019.0,
+          "width": 123.0,
+          "height": 34.0
+        },
+        {
+          "text": "رم",
+          "confidence": 74.45,
+          "left": 90.0,
+          "top": 1032.0,
+          "width": 37.0,
+          "height": 25.0
+        },
+        {
+          "text": "1 EA",
+          "confidence": 95.18,
+          "left": 869.0,
+          "top": 1052.0,
+          "width": 71.0,
+          "height": 36.0
+        },
+        {
+          "text": "40.00",
+          "confidence": 99.94,
+          "left": 962.0,
+          "top": 1052.0,
+          "width": 70.0,
+          "height": 30.0
+        },
+        {
+          "text": "EA",
+          "confidence": 99.89,
+          "left": 1036.0,
+          "top": 1051.0,
+          "width": 36.0,
+          "height": 32.0
+        },
+        {
+          "text": "40.00",
+          "confidence": 99.86,
+          "left": 1127.0,
+          "top": 1049.0,
+          "width": 78.0,
+          "height": 36.0
+        },
+        {
+          "text": "6.00",
+          "confidence": 99.96,
+          "left": 1234.0,
+          "top": 1049.0,
+          "width": 64.0,
+          "height": 33.0
+        },
+        {
+          "text": "46.00",
+          "confidence": 99.94,
+          "left": 1310.0,
+          "top": 1048.0,
+          "width": 78.0,
+          "height": 33.0
+        },
+        {
+          "text": "1",
+          "confidence": 99.95,
+          "left": 107.0,
+          "top": 1067.0,
+          "width": 17.0,
+          "height": 21.0
+        },
+        {
+          "text": "UNITEK USB TO SERIAL CONVERTER",
+          "confidence": 99.14,
+          "left": 132.0,
+          "top": 1057.0,
+          "width": 491.0,
+          "height": 34.0
+        },
+        {
+          "text": "EA",
+          "confidence": 99.56,
+          "left": 871.0,
+          "top": 1084.0,
+          "width": 69.0,
+          "height": 33.0
+        },
+        {
+          "text": "٤٠،٠٠",
+          "confidence": 89.74,
+          "left": 964.0,
+          "top": 1082.0,
+          "width": 66.0,
+          "height": 29.0
+        },
+        {
+          "text": "EA",
+          "confidence": 99.79,
+          "left": 1035.0,
+          "top": 1077.0,
+          "width": 39.0,
+          "height": 34.0
+        },
+        {
+          "text": "٤٠،٠٠",
+          "confidence": 85.0,
+          "left": 1129.0,
+          "top": 1082.0,
+          "width": 72.0,
+          "height": 30.0
+        },
+        {
+          "text": "٧،٠٠",
+          "confidence": 84.27,
+          "left": 1234.0,
+          "top": 1078.0,
+          "width": 62.0,
+          "height": 34.0
+        },
+        {
+          "text": "٤٦،٠٠",
+          "confidence": 88.3,
+          "left": 1313.0,
+          "top": 1076.0,
+          "width": 73.0,
+          "height": 34.0
+        },
+        {
+          "text": "محول يو إس بي إلى تسلسلي من يونيتك",
+          "confidence": 95.11,
+          "left": 131.0,
+          "top": 1089.0,
+          "width": 356.0,
+          "height": 37.0
+        },
+        {
+          "text": "G-ES",
+          "confidence": 93.59,
+          "left": 395.0,
+          "top": 1356.0,
+          "width": 214.0,
+          "height": 69.0
+        },
+        {
+          "text": "Taxable Value",
+          "confidence": 96.95,
+          "left": 784.0,
+          "top": 1654.0,
+          "width": 172.0,
+          "height": 30.0
+        },
+        {
+          "text": "40.00",
+          "confidence": 99.94,
+          "left": 1318.0,
+          "top": 1650.0,
+          "width": 74.0,
+          "height": 29.0
+        },
+        {
+          "text": "المبلغالمستحقكتابة",
+          "confidence": 88.8,
+          "left": 93.0,
+          "top": 1654.0,
+          "width": 494.0,
+          "height": 38.0
+        },
+        {
+          "text": "القيمة الخاضعة للضريية",
+          "confidence": 95.82,
+          "left": 781.0,
+          "top": 1680.0,
+          "width": 210.0,
+          "height": 32.0
+        },
+        {
+          "text": "٤٠،٠٠",
+          "confidence": 88.06,
+          "left": 1320.0,
+          "top": 1678.0,
+          "width": 70.0,
+          "height": 28.0
+        },
+        {
+          "text": "Saudi Arabian Riyal Forty Six Only (3# 46.00)",
+          "confidence": 97.95,
+          "left": 95.0,
+          "top": 1683.0,
+          "width": 498.0,
+          "height": 36.0
+        },
+        {
+          "text": "ستة واربعون ريال سعودي فقط",
+          "confidence": 94.97,
+          "left": 94.0,
+          "top": 1710.0,
+          "width": 250.0,
+          "height": 39.0
+        },
+        {
+          "text": "Value Added Tax 15 %",
+          "confidence": 98.58,
+          "left": 783.0,
+          "top": 1712.0,
+          "width": 273.0,
+          "height": 31.0
+        },
+        {
+          "text": "6.00",
+          "confidence": 99.96,
+          "left": 1332.0,
+          "top": 1708.0,
+          "width": 62.0,
+          "height": 30.0
+        },
+        {
+          "text": "ضريبة القيمة المضافة ١٠",
+          "confidence": 89.92,
+          "left": 781.0,
+          "top": 1740.0,
+          "width": 259.0,
+          "height": 34.0
+        },
+        {
+          "text": "٧،٠٠",
+          "confidence": 79.47,
+          "left": 1333.0,
+          "top": 1736.0,
+          "width": 59.0,
+          "height": 30.0
+        },
+        {
+          "text": "مبلغ ضريبة القيمة المضافة كتابة",
+          "confidence": 90.42,
+          "left": 96.0,
+          "top": 1745.0,
+          "width": 481.0,
+          "height": 34.0
+        },
+        {
+          "text": "Saudi Arabian Riyal Six Only (# 6.00)",
+          "confidence": 97.09,
+          "left": 96.0,
+          "top": 1775.0,
+          "width": 420.0,
+          "height": 33.0
+        },
+        {
+          "text": "Invoice Total",
+          "confidence": 99.89,
+          "left": 783.0,
+          "top": 1775.0,
+          "width": 199.0,
+          "height": 34.0
+        },
+        {
+          "text": "46.00",
+          "confidence": 99.95,
+          "left": 1306.0,
+          "top": 1771.0,
+          "width": 88.0,
+          "height": 32.0
+        },
+        {
+          "text": "ستة ريال سعودي فقط",
+          "confidence": 93.59,
+          "left": 95.0,
+          "top": 1802.0,
+          "width": 176.0,
+          "height": 34.0
+        },
+        {
+          "text": "إجمالي الفاتورة",
+          "confidence": 99.0,
+          "left": 780.0,
+          "top": 1810.0,
+          "width": 172.0,
+          "height": 39.0
+        },
+        {
+          "text": "٤٦،٠٠",
+          "confidence": 87.95,
+          "left": 1304.0,
+          "top": 1803.0,
+          "width": 87.0,
+          "height": 37.0
+        },
+        {
+          "text": "Dالإفصاحا",
+          "confidence": 89.64,
+          "left": 97.0,
+          "top": 1883.0,
+          "width": 189.0,
+          "height": 32.0
+        },
+        {
+          "text": "We declare that this invoice shows the actual price of the goods described and that all particulars are true and correct .",
+          "confidence": 98.83,
+          "left": 98.0,
+          "top": 1900.0,
+          "width": 1242.0,
+          "height": 41.0
+        },
+        {
+          "text": "Sales Return not acceptable after one week from purchase,opened packages are not refundable /exchangeable",
+          "confidence": 97.64,
+          "left": 97.0,
+          "top": 1927.0,
+          "width": 1181.0,
+          "height": 43.0
+        },
+        {
+          "text": "Customer's Seal and Signature",
+          "confidence": 98.0,
+          "left": 303.0,
+          "top": 2003.0,
+          "width": 371.0,
+          "height": 35.0
+        },
+        {
+          "text": "for Arrow Cross Trading Est",
+          "confidence": 98.52,
+          "left": 1059.0,
+          "top": 1996.0,
+          "width": 335.0,
+          "height": 35.0
+        },
+        {
+          "text": "D",
+          "confidence": 30.03,
+          "left": 263.0,
+          "top": 2021.0,
+          "width": 19.0,
+          "height": 11.0
+        },
+        {
+          "text": "ختم العميل وتوقيعه",
+          "confidence": 94.58,
+          "left": 305.0,
+          "top": 2038.0,
+          "width": 164.0,
+          "height": 28.0
+        },
+        {
+          "text": "مؤسسة سهم العبور للتجارة",
+          "confidence": 97.32,
+          "left": 1167.0,
+          "top": 2027.0,
+          "width": 226.0,
+          "height": 33.0
+        },
+        {
+          "text": "Authorised Signatory",
+          "confidence": 98.39,
+          "left": 1186.0,
+          "top": 2143.0,
+          "width": 210.0,
+          "height": 28.0
+        },
+        {
+          "text": "المُفوض بالتوقيع",
+          "confidence": 93.05,
+          "left": 1274.0,
+          "top": 2164.0,
+          "width": 125.0,
+          "height": 38.0
+        },
+        {
+          "text": "This is a Computer Generated Invoice",
+          "confidence": 99.1,
+          "left": 547.0,
+          "top": 2217.0,
+          "width": 388.0,
+          "height": 30.0
+        },
+        {
+          "text": "1EA",
+          "confidence": 98.31,
+          "left": 871.5,
+          "top": 1054.265167002012,
+          "width": 69.0,
+          "height": 31.5,
+          "source": "targeted_ocr",
+          "retry_kind": "table_area_en"
+        },
+        {
+          "text": "7",
+          "confidence": 95.77,
+          "left": 105.0,
+          "top": 1063.265167002012,
+          "width": 24.5,
+          "height": 28.0,
+          "source": "targeted_ocr",
+          "retry_kind": "table_area_en"
+        },
+        {
+          "text": "VATNo.:310209577200003",
+          "confidence": 98.71,
+          "left": 84.66666666666667,
+          "top": 372.8666666666667,
+          "width": 346.6666666666667,
+          "height": 29.333333333333332,
+          "source": "targeted_ocr",
+          "retry_kind": "vat_identifier"
+        },
+        {
+          "text": "：300402905100003",
+          "confidence": 99.03,
+          "left": 320.6666666666667,
+          "top": 798.8666666666667,
+          "width": 206.0,
+          "height": 26.666666666666668,
+          "source": "targeted_ocr",
+          "retry_kind": "vat_identifier"
+        },
+        {
+          "text": "04-06-2026",
+          "confidence": 98.95,
+          "left": 804.0,
+          "top": 703.7,
+          "width": 123.0,
+          "height": 27.5,
+          "source": "targeted_ocr",
+          "retry_kind": "date"
+        }
+      ]
+    }
+  ]
+}
