@@ -1,0 +1,913 @@
+{
+  "pages": [
+    {
+      "page": 1,
+      "render_dpi": 200,
+      "width": 595.260009765625,
+      "height": 841.8599853515625,
+      "canonical_width": 1654,
+      "canonical_height": 2339,
+      "words": [
+        {
+          "text": "For Trading",
+          "confidence": 99.94,
+          "left": 325.0,
+          "top": 69.0,
+          "width": 263.0,
+          "height": 62.0
+        },
+        {
+          "text": "Est.",
+          "confidence": 99.93,
+          "left": 582.0,
+          "top": 68.0,
+          "width": 95.0,
+          "height": 58.0
+        },
+        {
+          "text": "مؤسسة بسام الشرق للتجارة",
+          "confidence": 98.36,
+          "left": 1028.0,
+          "top": 59.0,
+          "width": 616.0,
+          "height": 61.0
+        },
+        {
+          "text": "Bassam",
+          "confidence": 99.8,
+          "left": 16.0,
+          "top": 77.0,
+          "width": 178.0,
+          "height": 49.0
+        },
+        {
+          "text": "Sharq",
+          "confidence": 99.42,
+          "left": 195.0,
+          "top": 74.0,
+          "width": 139.0,
+          "height": 54.0
+        },
+        {
+          "text": "ت٢٦٠٨٠",
+          "confidence": 58.49,
+          "left": 1185.0,
+          "top": 111.0,
+          "width": 277.0,
+          "height": 45.0
+        },
+        {
+          "text": "C.R. 2060058760",
+          "confidence": 99.83,
+          "left": 236.0,
+          "top": 134.0,
+          "width": 219.0,
+          "height": 36.0
+        },
+        {
+          "text": "لبيع مواد البناء",
+          "confidence": 98.12,
+          "left": 1233.0,
+          "top": 148.0,
+          "width": 172.0,
+          "height": 46.0
+        },
+        {
+          "text": "For Building",
+          "confidence": 99.92,
+          "left": 203.0,
+          "top": 174.0,
+          "width": 169.0,
+          "height": 34.0
+        },
+        {
+          "text": "Materials",
+          "confidence": 99.84,
+          "left": 362.0,
+          "top": 173.0,
+          "width": 127.0,
+          "height": 34.0
+        },
+        {
+          "text": "9479",
+          "confidence": 99.52,
+          "left": 951.0,
+          "top": 169.0,
+          "width": 155.0,
+          "height": 125.0
+        },
+        {
+          "text": "رمل  طابوق  كنكري أسمنت بلاط",
+          "confidence": 91.58,
+          "left": 1122.0,
+          "top": 189.0,
+          "width": 395.0,
+          "height": 47.0
+        },
+        {
+          "text": "Sands - Tabook - Concrete",
+          "confidence": 99.8,
+          "left": 123.0,
+          "top": 210.0,
+          "width": 349.0,
+          "height": 35.0
+        },
+        {
+          "text": "Cement",
+          "confidence": 99.92,
+          "left": 458.0,
+          "top": 209.0,
+          "width": 113.0,
+          "height": 35.0
+        },
+        {
+          "text": "حي صناعية الثقبة",
+          "confidence": 97.0,
+          "left": 1189.0,
+          "top": 232.0,
+          "width": 259.0,
+          "height": 50.0
+        },
+        {
+          "text": "Sinaiyah Ath Thuqbah Dist.",
+          "confidence": 98.45,
+          "left": 167.0,
+          "top": 245.0,
+          "width": 386.0,
+          "height": 41.0
+        },
+        {
+          "text": "BsT",
+          "confidence": 85.37,
+          "left": 729.0,
+          "top": 248.0,
+          "width": 251.0,
+          "height": 108.0
+        },
+        {
+          "text": "VAT No. 311490877600003",
+          "confidence": 99.84,
+          "left": 184.0,
+          "top": 288.0,
+          "width": 352.0,
+          "height": 37.0
+        },
+        {
+          "text": "الرقم الضريبي٣١١٤٩٠٨٠٠٠",
+          "confidence": 76.96,
+          "left": 1096.0,
+          "top": 278.0,
+          "width": 447.0,
+          "height": 51.0
+        },
+        {
+          "text": "اسم العم",
+          "confidence": 90.95,
+          "left": 110.0,
+          "top": 361.0,
+          "width": 120.0,
+          "height": 44.0
+        },
+        {
+          "text": "فاتورة ضريبية",
+          "confidence": 95.65,
+          "left": 701.0,
+          "top": 359.0,
+          "width": 295.0,
+          "height": 66.0
+        },
+        {
+          "text": "Invoice #",
+          "confidence": 99.84,
+          "left": 1092.0,
+          "top": 359.0,
+          "width": 124.0,
+          "height": 36.0
+        },
+        {
+          "text": "Date",
+          "confidence": 99.93,
+          "left": 1324.0,
+          "top": 358.0,
+          "width": 67.0,
+          "height": 36.0
+        },
+        {
+          "text": "Mode of Pay",
+          "confidence": 97.81,
+          "left": 1480.0,
+          "top": 354.0,
+          "width": 163.0,
+          "height": 40.0
+        },
+        {
+          "text": "يل",
+          "confidence": 87.14,
+          "left": 26.0,
+          "top": 365.0,
+          "width": 50.0,
+          "height": 35.0
+        },
+        {
+          "text": "!ALIREBAHESTFOR GENERAL CONT",
+          "confidence": 94.29,
+          "left": 223.0,
+          "top": 375.0,
+          "width": 377.0,
+          "height": 30.0
+        },
+        {
+          "text": "Customer Name",
+          "confidence": 99.96,
+          "left": 24.0,
+          "top": 396.0,
+          "width": 197.0,
+          "height": 34.0
+        },
+        {
+          "text": "175583",
+          "confidence": 98.59,
+          "left": 1063.0,
+          "top": 400.0,
+          "width": 112.0,
+          "height": 28.0
+        },
+        {
+          "text": "10-03-2026",
+          "confidence": 97.1,
+          "left": 1265.0,
+          "top": 398.0,
+          "width": 136.0,
+          "height": 28.0
+        },
+        {
+          "text": "TAX INVOICE",
+          "confidence": 99.91,
+          "left": 703.0,
+          "top": 421.0,
+          "width": 293.0,
+          "height": 48.0
+        },
+        {
+          "text": "Order #",
+          "confidence": 99.37,
+          "left": 1099.0,
+          "top": 484.0,
+          "width": 106.0,
+          "height": 39.0
+        },
+        {
+          "text": "Date",
+          "confidence": 99.86,
+          "left": 1323.0,
+          "top": 484.0,
+          "width": 70.0,
+          "height": 38.0
+        },
+        {
+          "text": "Credit Day",
+          "confidence": 99.92,
+          "left": 1493.0,
+          "top": 482.0,
+          "width": 139.0,
+          "height": 39.0
+        },
+        {
+          "text": "يل الرقم الضريبة",
+          "confidence": 94.67,
+          "left": 28.0,
+          "top": 498.0,
+          "width": 154.0,
+          "height": 34.0
+        },
+        {
+          "text": "العم",
+          "confidence": 96.58,
+          "left": 211.0,
+          "top": 500.0,
+          "width": 41.0,
+          "height": 27.0
+        },
+        {
+          "text": "300402905100003",
+          "confidence": 99.62,
+          "left": 255.0,
+          "top": 507.0,
+          "width": 240.0,
+          "height": 36.0
+        },
+        {
+          "text": "09:03:38",
+          "confidence": 99.83,
+          "left": 802.0,
+          "top": 504.0,
+          "width": 114.0,
+          "height": 32.0
+        },
+        {
+          "text": "Customer VAT No",
+          "confidence": 99.38,
+          "left": 26.0,
+          "top": 532.0,
+          "width": 230.0,
+          "height": 34.0
+        },
+        {
+          "text": "02-04-2026",
+          "confidence": 96.13,
+          "left": 1051.0,
+          "top": 529.0,
+          "width": 199.0,
+          "height": 48.0
+        },
+        {
+          "text": "0-Mar-2026",
+          "confidence": 98.21,
+          "left": 1267.0,
+          "top": 527.0,
+          "width": 157.0,
+          "height": 34.0
+        },
+        {
+          "text": "وحدة",
+          "confidence": 99.83,
+          "left": 1015.0,
+          "top": 598.0,
+          "width": 81.0,
+          "height": 51.0
+        },
+        {
+          "text": "سعر الوحدة",
+          "confidence": 99.09,
+          "left": 1149.0,
+          "top": 591.0,
+          "width": 94.0,
+          "height": 29.0
+        },
+        {
+          "text": "مسلسل",
+          "confidence": 99.14,
+          "left": 8.0,
+          "top": 608.0,
+          "width": 85.0,
+          "height": 41.0
+        },
+        {
+          "text": "العدد",
+          "confidence": 99.77,
+          "left": 894.0,
+          "top": 600.0,
+          "width": 74.0,
+          "height": 41.0
+        },
+        {
+          "text": "الضرية٪",
+          "confidence": 92.12,
+          "left": 1273.0,
+          "top": 601.0,
+          "width": 89.0,
+          "height": 47.0
+        },
+        {
+          "text": "غير شامَل الضريبة",
+          "confidence": 92.24,
+          "left": 1123.0,
+          "top": 614.0,
+          "width": 146.0,
+          "height": 31.0
+        },
+        {
+          "text": "الضريبة الإجمالي",
+          "confidence": 94.23,
+          "left": 1366.0,
+          "top": 604.0,
+          "width": 109.0,
+          "height": 36.0
+        },
+        {
+          "text": "الإجمالي",
+          "confidence": 90.06,
+          "left": 1497.0,
+          "top": 595.0,
+          "width": 138.0,
+          "height": 54.0
+        },
+        {
+          "text": "Description",
+          "confidence": 99.96,
+          "left": 298.0,
+          "top": 625.0,
+          "width": 156.0,
+          "height": 34.0
+        },
+        {
+          "text": "ان",
+          "confidence": 76.97,
+          "left": 473.0,
+          "top": 626.0,
+          "width": 36.0,
+          "height": 31.0
+        },
+        {
+          "text": "البي",
+          "confidence": 93.83,
+          "left": 588.0,
+          "top": 617.0,
+          "width": 86.0,
+          "height": 49.0
+        },
+        {
+          "text": "S.No.",
+          "confidence": 96.92,
+          "left": 9.0,
+          "top": 646.0,
+          "width": 82.0,
+          "height": 36.0
+        },
+        {
+          "text": "Qty.",
+          "confidence": 99.69,
+          "left": 905.0,
+          "top": 645.0,
+          "width": 58.0,
+          "height": 35.0
+        },
+        {
+          "text": "Unit",
+          "confidence": 99.96,
+          "left": 1026.0,
+          "top": 643.0,
+          "width": 64.0,
+          "height": 33.0
+        },
+        {
+          "text": "Unit Price",
+          "confidence": 99.9,
+          "left": 1147.0,
+          "top": 640.0,
+          "width": 103.0,
+          "height": 25.0
+        },
+        {
+          "text": "VAT%",
+          "confidence": 99.57,
+          "left": 1281.0,
+          "top": 639.0,
+          "width": 76.0,
+          "height": 33.0
+        },
+        {
+          "text": "VAT Amount",
+          "confidence": 99.69,
+          "left": 1369.0,
+          "top": 643.0,
+          "width": 108.0,
+          "height": 25.0
+        },
+        {
+          "text": "Total Amount",
+          "confidence": 99.94,
+          "left": 1487.0,
+          "top": 640.0,
+          "width": 154.0,
+          "height": 28.0
+        },
+        {
+          "text": "to",
+          "confidence": 61.68,
+          "left": 603.0,
+          "top": 651.0,
+          "width": 14.0,
+          "height": 8.0
+        },
+        {
+          "text": "Excl of VAT",
+          "confidence": 73.6,
+          "left": 1140.0,
+          "top": 657.0,
+          "width": 119.0,
+          "height": 26.0
+        },
+        {
+          "text": "رمل تاعم",
+          "confidence": 88.18,
+          "left": 101.0,
+          "top": 696.0,
+          "width": 113.0,
+          "height": 40.0
+        },
+        {
+          "text": "20.00",
+          "confidence": 99.77,
+          "left": 872.0,
+          "top": 691.0,
+          "width": 84.0,
+          "height": 40.0
+        },
+        {
+          "text": "BAG",
+          "confidence": 99.84,
+          "left": 1022.0,
+          "top": 692.0,
+          "width": 69.0,
+          "height": 37.0
+        },
+        {
+          "text": "2.350",
+          "confidence": 96.4,
+          "left": 1132.0,
+          "top": 692.0,
+          "width": 83.0,
+          "height": 37.0
+        },
+        {
+          "text": "15.00",
+          "confidence": 97.9,
+          "left": 1277.0,
+          "top": 690.0,
+          "width": 72.0,
+          "height": 38.0
+        },
+        {
+          "text": "7.05",
+          "confidence": 96.8,
+          "left": 1367.0,
+          "top": 691.0,
+          "width": 65.0,
+          "height": 35.0
+        },
+        {
+          "text": "54.05",
+          "confidence": 99.69,
+          "left": 1528.0,
+          "top": 689.0,
+          "width": 81.0,
+          "height": 37.0
+        },
+        {
+          "text": "SAND NORMAL (BAG)",
+          "confidence": 95.65,
+          "left": 102.0,
+          "top": 738.0,
+          "width": 293.0,
+          "height": 34.0
+        },
+        {
+          "text": "4.00",
+          "confidence": 88.9,
+          "left": 892.0,
+          "top": 779.0,
+          "width": 64.0,
+          "height": 34.0
+        },
+        {
+          "text": "BAG",
+          "confidence": 99.67,
+          "left": 1023.0,
+          "top": 778.0,
+          "width": 68.0,
+          "height": 34.0
+        },
+        {
+          "text": "14.790",
+          "confidence": 99.83,
+          "left": 1121.0,
+          "top": 777.0,
+          "width": 92.0,
+          "height": 33.0
+        },
+        {
+          "text": "5.00",
+          "confidence": 99.93,
+          "left": 1280.0,
+          "top": 775.0,
+          "width": 67.0,
+          "height": 35.0
+        },
+        {
+          "text": "8.87",
+          "confidence": 92.27,
+          "left": 1368.0,
+          "top": 775.0,
+          "width": 63.0,
+          "height": 35.0
+        },
+        {
+          "text": "68.03",
+          "confidence": 99.57,
+          "left": 1531.0,
+          "top": 775.0,
+          "width": 78.0,
+          "height": 33.0
+        },
+        {
+          "text": "2",
+          "confidence": 95.35,
+          "left": 54.0,
+          "top": 785.0,
+          "width": 24.0,
+          "height": 31.0
+        },
+        {
+          "text": "عادي",
+          "confidence": 92.15,
+          "left": 99.0,
+          "top": 774.0,
+          "width": 78.0,
+          "height": 51.0
+        },
+        {
+          "text": "متت",
+          "confidence": 71.87,
+          "left": 162.0,
+          "top": 785.0,
+          "width": 80.0,
+          "height": 28.0
+        },
+        {
+          "text": "CEMENT NORMAL (SAUDD",
+          "confidence": 93.7,
+          "left": 104.0,
+          "top": 822.0,
+          "width": 354.0,
+          "height": 34.0
+        },
+        {
+          "text": "REDA.P4",
+          "confidence": 86.22,
+          "left": 493.0,
+          "top": 1513.0,
+          "width": 347.0,
+          "height": 92.0
+        },
+        {
+          "text": "Amount In words",
+          "confidence": 98.44,
+          "left": 68.0,
+          "top": 1774.0,
+          "width": 190.0,
+          "height": 24.0
+        },
+        {
+          "text": "Grand Total",
+          "confidence": 99.95,
+          "left": 983.0,
+          "top": 1780.0,
+          "width": 172.0,
+          "height": 37.0
+        },
+        {
+          "text": "المجموع الكلي",
+          "confidence": 96.85,
+          "left": 1278.0,
+          "top": 1771.0,
+          "width": 175.0,
+          "height": 51.0
+        },
+        {
+          "text": "106.16",
+          "confidence": 99.8,
+          "left": 1494.0,
+          "top": 1779.0,
+          "width": 123.0,
+          "height": 36.0
+        },
+        {
+          "text": "Saudi Riyal One Hundred Twenty Two and Eight Halalah Only.",
+          "confidence": 99.54,
+          "left": 76.0,
+          "top": 1815.0,
+          "width": 660.0,
+          "height": 34.0
+        },
+        {
+          "text": "Discount",
+          "confidence": 99.97,
+          "left": 985.0,
+          "top": 1827.0,
+          "width": 134.0,
+          "height": 35.0
+        },
+        {
+          "text": "الخصم",
+          "confidence": 87.2,
+          "left": 1331.0,
+          "top": 1817.0,
+          "width": 122.0,
+          "height": 46.0
+        },
+        {
+          "text": "0.00",
+          "confidence": 99.94,
+          "left": 1541.0,
+          "top": 1830.0,
+          "width": 76.0,
+          "height": 38.0
+        },
+        {
+          "text": "فتط ماعة و اتان وصرون ريالأسوديا و ثان هات لا ضير",
+          "confidence": 81.84,
+          "left": 78.0,
+          "top": 1854.0,
+          "width": 468.0,
+          "height": 37.0
+        },
+        {
+          "text": "Total VAT",
+          "confidence": 99.64,
+          "left": 983.0,
+          "top": 1869.0,
+          "width": 146.0,
+          "height": 38.0
+        },
+        {
+          "text": "الإجمالي الضريبة",
+          "confidence": 95.17,
+          "left": 1239.0,
+          "top": 1866.0,
+          "width": 209.0,
+          "height": 45.0
+        },
+        {
+          "text": "15.92",
+          "confidence": 99.92,
+          "left": 1507.0,
+          "top": 1872.0,
+          "width": 109.0,
+          "height": 39.0
+        },
+        {
+          "text": "Net Amount",
+          "confidence": 99.94,
+          "left": 984.0,
+          "top": 1916.0,
+          "width": 175.0,
+          "height": 36.0
+        },
+        {
+          "text": "صافي المبلغ",
+          "confidence": 94.74,
+          "left": 1296.0,
+          "top": 1905.0,
+          "width": 158.0,
+          "height": 54.0
+        },
+        {
+          "text": "122.08",
+          "confidence": 95.59,
+          "left": 1495.0,
+          "top": 1920.0,
+          "width": 124.0,
+          "height": 37.0
+        },
+        {
+          "text": "البائع",
+          "confidence": 98.53,
+          "left": 699.0,
+          "top": 1994.0,
+          "width": 107.0,
+          "height": 52.0
+        },
+        {
+          "text": "توقيع المستلم",
+          "confidence": 99.67,
+          "left": 1411.0,
+          "top": 1991.0,
+          "width": 214.0,
+          "height": 51.0
+        },
+        {
+          "text": "الفاتورة صادرة من",
+          "confidence": 96.44,
+          "left": 37.0,
+          "top": 2005.0,
+          "width": 262.0,
+          "height": 47.0
+        },
+        {
+          "text": "AHMAN",
+          "confidence": 96.14,
+          "left": 718.0,
+          "top": 2030.0,
+          "width": 80.0,
+          "height": 28.0
+        },
+        {
+          "text": "Primar",
+          "confidence": 90.57,
+          "left": 81.0,
+          "top": 2044.0,
+          "width": 92.0,
+          "height": 15.0
+        },
+        {
+          "text": "Receiver's Signatur",
+          "confidence": 99.9,
+          "left": 1344.0,
+          "top": 2037.0,
+          "width": 310.0,
+          "height": 37.0
+        },
+        {
+          "text": "Issued From :",
+          "confidence": 99.55,
+          "left": 52.0,
+          "top": 2054.0,
+          "width": 224.0,
+          "height": 36.0
+        },
+        {
+          "text": "Salesman :",
+          "confidence": 97.28,
+          "left": 669.0,
+          "top": 2047.0,
+          "width": 180.0,
+          "height": 31.0
+        },
+        {
+          "text": "جوال  ٠٥٩٠٢٠٤١٣٩ ٠٥٣٩٩٤١٤٠٧",
+          "confidence": 83.32,
+          "left": 23.0,
+          "top": 2095.0,
+          "width": 556.0,
+          "height": 49.0
+        },
+        {
+          "text": "Account No. SNB Bank: 04400000007001",
+          "confidence": 99.53,
+          "left": 607.0,
+          "top": 2102.0,
+          "width": 541.0,
+          "height": 34.0
+        },
+        {
+          "text": "قم الحساب في البنك الأهلي السعودي",
+          "confidence": 96.52,
+          "left": 1142.0,
+          "top": 2090.0,
+          "width": 512.0,
+          "height": 46.0
+        },
+        {
+          "text": "Mobile:",
+          "confidence": 99.86,
+          "left": 23.0,
+          "top": 2147.0,
+          "width": 124.0,
+          "height": 40.0
+        },
+        {
+          "text": "0590204139 - 0539941407",
+          "confidence": 99.82,
+          "left": 148.0,
+          "top": 2141.0,
+          "width": 433.0,
+          "height": 45.0
+        },
+        {
+          "text": "SNB Bank IBAN No.: SA3910000004400000007001",
+          "confidence": 99.39,
+          "left": 605.0,
+          "top": 2140.0,
+          "width": 667.0,
+          "height": 39.0
+        },
+        {
+          "text": "قم الحسابالدولي",
+          "confidence": 73.66,
+          "left": 1259.0,
+          "top": 2132.0,
+          "width": 395.0,
+          "height": 45.0
+        },
+        {
+          "text": "5.00",
+          "confidence": 99.13,
+          "left": 1280.0,
+          "top": 701.2783495702005,
+          "width": 68.0,
+          "height": 27.5,
+          "source": "targeted_ocr"
+        },
+        {
+          "text": "17.05",
+          "confidence": 95.71,
+          "left": 1332.0,
+          "top": 701.2783495702005,
+          "width": 98.0,
+          "height": 26.5,
+          "source": "targeted_ocr"
+        },
+        {
+          "text": "311490877600003",
+          "confidence": 99.99,
+          "left": 296.0,
+          "top": 293.1333333333333,
+          "width": 236.0,
+          "height": 28.0,
+          "source": "targeted_ocr"
+        }
+      ]
+    }
+  ]
+}

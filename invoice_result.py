@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 from local_ai_parser import parse_invoice_hybrid
+from visual_invoice import TEXT_FIELDS, ITEM_TEXT, ITEM_NUMBERS, TOTAL_NUMBERS, VAT_NUMBERS
 
 
 def extract_result(payload, filename, language="eng+ara", *, pdf_path=None, mode="fast", details=None):
@@ -67,12 +68,19 @@ def extract_result(payload, filename, language="eng+ara", *, pdf_path=None, mode
         "invoice_date": data.get("invoice", {}).get("date"),
         "date_of_supply": data.get("invoice", {}).get("date_of_supply"),
         "payment_method": data.get("invoice", {}).get("payment_method"),
-        "supplier": select(supplier, ("name_ar", "name_en", "vat_number", "commercial_registration")),
-        "customer": select(customer, ("name", "vat_number", "customer_code", "commercial_registration", "address")),
-        "items": [select(item, ("item_code", "description", "quantity", "unit_price", "amount", "vat_amount", "gross_amount",
-                    "printed_amount", "printed_vat_amount", "amount_source"))
+        "document_type": data.get("document_type"),
+        "document_type_ar": data.get("document_type_ar"),
+        "invoice": select(data.get("invoice", {}), TEXT_FIELDS["invoice"]),
+        "supplier": select(supplier, (*TEXT_FIELDS["supplier"], "commercial_registration", "address", "business_type")),
+        "customer": select(customer, (*TEXT_FIELDS["customer"], "commercial_registration")),
+        "items": [select(item, (*ITEM_TEXT, *ITEM_NUMBERS, "line_no", "printed_amount", "printed_vat_amount", "amount_source"))
                   for item in data.get("items", [])],
-        "totals": select(data.get("totals", {}), ("subtotal", "discount", "vat_rate", "vat_amount", "net_amount", "currency")),
+        "totals": select(data.get("totals", {}), (*TOTAL_NUMBERS, "currency", "amount_in_words")),
+        "vat_summary": select(data.get("vat_summary", {}), (*VAT_NUMBERS, "tax_code")),
+        "amount_in_words_ar": data.get("amount_in_words_ar"),
+        "handwritten_notes": data.get("handwritten_notes", []),
+        "other_fields": data.get("other_fields", []),
+        "bank_details": data.get("bank_details"),
         "review_notes": list(dict.fromkeys(notes)),
     }
 

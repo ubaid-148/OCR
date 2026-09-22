@@ -79,7 +79,7 @@ class ColabUploadTests(unittest.TestCase):
             self.assertEqual(raw['pages'],[])
             self.assertEqual(raw['extraction_details']['quality']['parser'],'visual_ai')
             self.assertIn('--pdf',calls[1])
-            self.assertEqual(calls[1][calls[1].index('--mode')+1],'auto')
+            self.assertEqual(calls[1][calls[1].index('--mode')+1],'fast')
 
     def test_ocr_failure_does_not_parse_or_download_a_result(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -46,6 +46,7 @@ Open <http://127.0.0.1:8765> and upload a PDF invoice.
 [Open the invoice notebook](https://colab.research.google.com/github/ubaid-148/OCR/blob/main/colab_setup.ipynb), choose **Runtime → Change runtime type → T4 GPU**, then **Runtime → Run all**.
 Upload one PDF when prompted. Its final invoice JSON is displayed and downloaded automatically.
 
+For the free OCR flow, use `colab_setup.ipynb`, not the separate training notebook.
 The notebook has three steps: load project, prepare OCR, and upload/get result.
 Step 1 prints the Git commit being tested. Step 2 checks the Paddle device and
 runs a committed invoice sample through the parser before enabling upload.
@@ -57,7 +58,9 @@ before opening the PDF upload prompt.
 The sample check does not run live OCR; the first PDF upload does. After upload,
 the notebook prints the OCR device, pipeline version, and stage timings above the
 downloaded invoice JSON. Check that the device says `gpu:0` when testing on T4.
-The concise JSON also includes `date_of_supply`, `payment_method`,
+The Colab JSON preserves invoice time/reference, supported party/address fields,
+item units/tax rates/discounts, VAT summary, notes, extra labelled fields and bank
+details when extracted. It also includes `date_of_supply`, `payment_method`,
 `customer.customer_code`, `customer.address`, and both parties' `commercial_registration`.
 Absent values remain null; vision's `cr_number` is exposed as `commercial_registration`.
 
@@ -77,14 +80,15 @@ the OCR result flow remains the same but takes longer.
 Focused retries now reread faint customer names and item descriptions from both
 enhanced and original crops. A numeric item row without a readable description
 triggers a table reread; a failed crop is reported while other retries continue.
-Default `EXTRACTION_MODE="auto"` runs PaddleOCR with focused retries, then reads
-every original PDF page with a local vision model. The existing spatial parser
+Default `EXTRACTION_MODE="fast"` runs PaddleOCR with focused retries and the
+spatial parser, without downloading or calling Qwen. Choose `auto` explicitly
+to enable experimental full-page vision review. The existing spatial parser
 provides independent evidence and a fallback. Image readings are checked against
 OCR, row order/count and arithmetic; disagreement stays flagged for review.
 No per-supplier template selection is required. This does not guarantee correct
 reading of every layout, scan or long table.
 
-Step 2 prepares Ollama and `qwen3-vl:4b` in Colab. Initial setup downloads the
+When `auto` is selected, Step 2 prepares Ollama and `qwen3-vl:4b` in Colab. Initial setup downloads the
 model; subsequent uploads reuse it. Installation follows the
 [official Linux instructions](https://docs.ollama.com/linux). GPU is recommended;
 vision inference adds time beyond the OCR timings. `fast` explicitly selects the

@@ -592,7 +592,7 @@ def parse_layout(pages,filename,language):
         inv=keep('invoice.invoice_number',chosen,normalize(chosen['text']))
     for w in words:
         if inv is not None:break
-        if contains(w['text'],INVOICE_LABELS):
+        if contains(w['text'],INVOICE_LABELS) or re.fullmatch(r'(?i)(?:invoice|inv\.?)\s*#(?:\s*[A-Za-z0-9/-]+)?', w['text'].strip()):
             m=re.search(r'(?:[:#]\s*|\b)([A-Za-z]+[-/][A-Za-z0-9/-]*\d[A-Za-z0-9/-]*|\d{3,})\s*$',normalize(w['text']))
             value=near(w,lambda s:bool(re.fullmatch(r'[A-Za-z0-9/-]*\d[A-Za-z0-9/-]*',normalize(s).lstrip(':# '))) and number_string(s,{15}) is None and not re.fullmatch(r'\d{1,4}[-/]\d{1,2}[-/]\d{2,4}',normalize(s)))
             if m: inv=keep('invoice.invoice_number',w,m[1]);break
@@ -704,10 +704,11 @@ def parse_layout(pages,filename,language):
         return keep('supplier.name_ar' if arabic else 'supplier.name_en',w)
     name_ar,name_en=company(True),company(False)
     pay_label=next((w for w in words if contains(w['text'],('payment method','payment mthd','payment methd','payment type','طريقة الدفع','نوع الدفع'))),None)
-    pay=next((w for w in words if contains(w['text'],('cash','card','credit','mada','span','network','بالنقد','نقدي','بطاقة','مدى','شبكة مدي','شبكةمدي'))),None)
+    payment_words=[w for w in words if not contains(w['text'],('credit day','credit days','credit limit','card number','card no'))]
+    pay=next((w for w in payment_words if contains(w['text'],('cash','card','credit','mada','span','network','بالنقد','نقدي','بطاقة','مدى','شبكة مدي','شبكةمدي'))),None)
     if pay_label:
         pay=pay_label if any(token in normalize(pay_label['text']).casefold() for token in ('cash','card','credit','mada','span','بالنقد','نقدي','بطاقة','مدى','شبكةمدي')) else near(
-            pay_label,lambda s:contains(s,('cash','card','credit','mada','span','network','بالنقد','نقدي','بطاقة','مدى','شبكة مدي','شبكةمدي')),below=2)
+            pay_label,lambda s:not contains(s,('credit day','credit days','credit limit','card number','card no')) and contains(s,('cash','card','credit','mada','span','network','بالنقد','نقدي','بطاقة','مدى','شبكة مدي','شبكةمدي')),below=2)
     payment=None
     if pay:
         raw_payment=normalize(pay['text']).strip(' :')

@@ -26,6 +26,21 @@ def add_printed_details(data, pages):
                     evidence[field]=proof(dict(value,_page=page.get('page',1)))
                     return tail
             return None
+        # Explicit CR labels in the supplier masthead/footer. Do not reinterpret VAT IDs.
+        customer_y = min((y(w) for w in words if contains(w['text'], ('customer name', 'buyer name', 'اسم العميل'))), default=0)
+        bottom = max((y(w) for w in words), default=0)
+        for word in words:
+            if not (y(word) < customer_y or y(word) > bottom * .85):
+                continue
+            if contains(word['text'], ('customer', 'buyer', 'العميل')):
+                continue
+            match = re.search(r'(?i)\bC\.?\s*R\.?\s*[:：]?\s*(\d{10})(?!\d)', word['text'])
+            if match and (word.get('source') == 'native_text' or word.get('confidence', 0) >= 90):
+                party = data.setdefault('supplier', {})
+                if not party.get('cr_number') and not party.get('commercial_registration'):
+                    party['cr_number'] = match[1]
+                    evidence['supplier.cr_number'] = proof(dict(word, _page=page.get('page', 1)))
+                break
         address=labeled(r'^CUSTOMER ADDRESS\s*:?', 'customer.address', below=True)
         if address:data['customer']['address']=address
         business=next((w for w in words if re.match(r'(?i)^SALE ALL KINDS OF\b',w['text'])),None)
