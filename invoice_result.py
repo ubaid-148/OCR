@@ -42,11 +42,16 @@ def extract_result(payload, filename, language="eng+ara", *, pdf_path=None, mode
         notes.append("Item arithmetic or totals could not be fully verified.")
     if quality.get("targeted_ocr_errors"):
         notes.append("Some focused OCR retries failed; check missing values.")
+    supplier = dict(data.get("supplier", {}))
+    customer = dict(data.get("customer", {}))
+    for party in (supplier, customer):
+        party["commercial_registration"] = (party.get("commercial_registration")
+                                             or party.get("cr_number") or None)
     optional_fields = {
         "invoice.date_of_supply": data.get("invoice", {}).get("date_of_supply"),
         "invoice.payment_method": data.get("invoice", {}).get("payment_method"),
-        "supplier.commercial_registration": data.get("supplier", {}).get("commercial_registration"),
-        "customer.commercial_registration": data.get("customer", {}).get("commercial_registration"),
+        "supplier.commercial_registration": supplier.get("commercial_registration"),
+        "customer.commercial_registration": customer.get("commercial_registration"),
         "customer.customer_code": data.get("customer", {}).get("customer_code"),
         "customer.address": data.get("customer", {}).get("address"),
     }
@@ -60,8 +65,10 @@ def extract_result(payload, filename, language="eng+ara", *, pdf_path=None, mode
         "status": "needs_review" if needs_review else "extracted",
         "invoice_number": data.get("invoice", {}).get("invoice_number"),
         "invoice_date": data.get("invoice", {}).get("date"),
-        "supplier": select(data.get("supplier", {}), ("name_ar", "name_en", "vat_number")),
-        "customer": select(data.get("customer", {}), ("name", "vat_number")),
+        "date_of_supply": data.get("invoice", {}).get("date_of_supply"),
+        "payment_method": data.get("invoice", {}).get("payment_method"),
+        "supplier": select(supplier, ("name_ar", "name_en", "vat_number", "commercial_registration")),
+        "customer": select(customer, ("name", "vat_number", "customer_code", "commercial_registration", "address")),
         "items": [select(item, ("item_code", "description", "quantity", "unit_price", "amount", "vat_amount", "gross_amount",
                     "printed_amount", "printed_vat_amount", "amount_source"))
                   for item in data.get("items", [])],

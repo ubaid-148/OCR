@@ -22,6 +22,25 @@ class InvoiceResultTests(unittest.TestCase):
         self.assertNotIn('field_evidence', json.dumps(result))
         self.assertNotIn('validation', result)
 
+    def test_optional_header_fields_survive_concise_output(self):
+        for cr_key in ("cr_number", "commercial_registration"):
+            with self.subTest(cr_key=cr_key):
+                parsed = {"data": {
+                    "invoice": {"date_of_supply": "2026-03-08", "payment_method": "CASH"},
+                    "supplier": {cr_key: "2051065071"},
+                    "customer": {"customer_code": "00394", "address": "Khobar",
+                                 cr_key: "1234567890"}},
+                    "quality": {"needs_review": False}}
+                with patch("invoice_result.parse_invoice_hybrid", return_value=parsed):
+                    result = extract_result({"pages": []}, "9495.pdf")
+                self.assertEqual(result["payment_method"], "CASH")
+                self.assertEqual(result["date_of_supply"], "2026-03-08")
+                self.assertEqual(result["customer"]["customer_code"], "00394")
+                self.assertEqual(result["customer"]["address"], "Khobar")
+                self.assertEqual(result["supplier"]["commercial_registration"], "2051065071")
+                self.assertEqual(result["customer"]["commercial_registration"], "1234567890")
+                self.assertEqual(result["review_notes"], [])
+
     def test_empty_ocr_is_not_reported_as_success(self):
         result = extract_result({'pages': []}, 'empty.pdf')
         self.assertEqual(result['status'], 'needs_review')

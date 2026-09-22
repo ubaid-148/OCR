@@ -76,6 +76,60 @@ class VisualInvoiceTests(unittest.TestCase):
         self.assertEqual(list(items["format"]["properties"]), ["items"])
         self.assertEqual(items["model"], "qwen3-vl:4b")
 
+    def test_scope_metrics_convert_nanoseconds_and_keep_missing_values_unknown(self):
+        diagnostics = []
+        responses = [
+            {"load_duration": 2_000_000_000, "prompt_eval_duration": 3_500_000_000,
+             "eval_duration": 4_000_000_000, "total_duration": 10_000_000_000,
+             "prompt_eval_count": 100, "eval_count": 20, "done_reason": "stop",
+             "message": {"content": "{}"}},
+            {"message": {"content": '{"items":[]}'}}]
+        with patch("visual_invoice.request_json", side_effect=responses):
+            ask_visual(["FULL", "CROP"], 2, 3, diagnostics=diagnostics)
+        header, items = diagnostics
+        self.assertEqual((header["page"], header["scope"], header["image_count"]), (2, "header", 1))
+        self.assertEqual(header["model_load_seconds"], 2)
+        self.assertEqual(header["prompt_eval_seconds"], 3.5)
+        self.assertEqual(header["generation_seconds"], 4)
+        self.assertEqual(header["server_total_seconds"], 10)
+        self.assertEqual(header["eval_count"], 20)
+        self.assertIsNone(header["image_processing_seconds"])
+        self.assertEqual(items["image_count"], 2)
+        self.assertIsNone(items["model_load_seconds"])
+        self.assertGreaterEqual(items["wall_seconds"], 0)
+
+    def test_diagnostics_survive_rejected_visual_rows_on_multiple_pages(self):
+        responses = []
+        for _ in range(2):
+            responses.extend([{"message": {"content": "{}"}, "load_duration": 1_000_000_000},
+                              {"message": {"content": '{"items":[]}'}}])
+        with patch("visual_invoice.parse_invoice_hybrid", return_value=fallback()), \
+             patch("visual_invoice.render_pages", return_value=[(1, 2, ["IMAGE"]), (2, 2, ["IMAGE"])]), \
+             patch("visual_invoice.request_json", side_effect=responses), \
+             patch("visual_invoice.audit_ai", return_value=([], {})):
+            result = parse_invoice_visual("unused.pdf", [], "x.pdf", "eng")
+        self.assertEqual(result["quality"]["local_ai_status"], "rejected_unsafe_vision_result")
+        self.assertEqual([r["page"] for r in result["vision_diagnostics"]], [1, 1, 2, 2])
+        self.assertEqual(result["vision_diagnostics"][0]["model_load_seconds"], 1)
+
+    def test_failed_requests_retain_available_metrics_and_completed_header(self):
+        for failure in (TimeoutError("timed out"),
+                        {"done_reason": "length", "eval_count": 4096,
+                         "eval_duration": 8_000_000_000, "message": {"content": "{}"}}):
+            with self.subTest(failure=failure):
+                responses = [{"message": {"content": '{"invoice":{"invoice_number":"INV-1"}}'}}, failure]
+                with patch("visual_invoice.parse_invoice_hybrid", return_value=fallback()), \
+                     patch("visual_invoice.render_pages", return_value=[(1, 1, ["IMAGE"])]), \
+                     patch("visual_invoice.request_json", side_effect=responses):
+                    result = parse_invoice_visual("unused.pdf", [], "x.pdf", "eng")
+                self.assertEqual(result["data"]["invoice"]["invoice_number"], "INV-1")
+                header, items = result["vision_diagnostics"]
+                self.assertEqual(header["status"], "completed")
+                self.assertEqual(items["status"], "failed")
+                self.assertIn("visual_ai", result["stage_timings"])
+                self.assertGreaterEqual(items["wall_seconds"], 0)
+                self.assertEqual(items["generation_seconds"], 8 if isinstance(failure, dict) else None)
+
     def test_truncated_scope_is_rejected_with_token_count(self):
         with patch("visual_invoice.request_json", return_value={"done": True,
                 "done_reason": "length", "eval_count": 4096, "message": {"content": "{}"}}):

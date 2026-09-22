@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 import io
+import math
 import json
 import os
 import re
@@ -216,8 +217,24 @@ def render_pages(pdf_path: str | Path, ocr_pages: list[dict[str, Any]] | None = 
         document.close()
 
 
+def _record_ollama_metrics(record: dict[str, Any], response: dict[str, Any]) -> None:
+    """Ollama reports nanoseconds; prompt evaluation is not image-only time."""
+    for source, target in (("total_duration", "server_total_seconds"),
+                           ("load_duration", "model_load_seconds"),
+                           ("prompt_eval_duration", "prompt_eval_seconds"),
+                           ("eval_duration", "generation_seconds")):
+        value = response.get(source)
+        record[target] = (round(value / 1_000_000_000, 6)
+                          if type(value) in (int, float) and math.isfinite(value) and value >= 0
+                          else None)
+    for key in ("prompt_eval_count", "eval_count"):
+        value = response.get(key)
+        record[key] = value if type(value) is int and value >= 0 else None
+    record["done_reason"] = response.get("done_reason")
+
+
 def _ask_scope(images: list[str], page_number: int, page_count: int,
-               scope: str) -> dict[str, Any]:
+               scope: str, diagnostics: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     if scope == "header":
         schema = HEADER_SCHEMA
         scope_images = images[:1]
@@ -257,34 +274,49 @@ def _ask_scope(images: list[str], page_number: int, page_count: int,
                     "num_predict": predict_limit},
         "messages": [{"role": "user", "content": prompt, "images": scope_images}],
     }
-    response = request_json(os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434/api/chat"),
-                            body, timeout=float(os.environ.get("OLLAMA_TIMEOUT_SECONDS", "180")))
-    if response.get("error"):
-        raise ValueError(f"Ollama {scope} error: {response['error']}")
-    if response.get("done") is False or response.get("done_reason") == "length":
-        raise ValueError(f"Vision {scope} output for page {page_number} was truncated "
-                         f"(generated {response.get('eval_count', '?')} / {predict_limit} tokens)")
-    content = response.get("message", {}).get("content")
-    parsed = json.loads(content) if isinstance(content, str) else content
-    if not isinstance(parsed, dict):
-        raise ValueError(f"Vision {scope} output for page {page_number} was not an object")
-    return parsed
+    record = {"page": page_number, "scope": scope, "model": model,
+              "image_count": len(scope_images), "status": "failed",
+              "image_processing_seconds": None}
+    _record_ollama_metrics(record, {})
+    if diagnostics is not None:
+        diagnostics.append(record)
+    started = perf_counter()
+    try:
+        response = request_json(os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434/api/chat"),
+                                body, timeout=float(os.environ.get("OLLAMA_TIMEOUT_SECONDS", "180")))
+        _record_ollama_metrics(record, response)
+        if response.get("error"):
+            raise ValueError(f"Ollama {scope} error: {response['error']}")
+        if response.get("done") is False or response.get("done_reason") == "length":
+            raise ValueError(f"Vision {scope} output for page {page_number} was truncated "
+                             f"(generated {response.get('eval_count', '?')} / {predict_limit} tokens)")
+        content = response.get("message", {}).get("content")
+        parsed = json.loads(content) if isinstance(content, str) else content
+        if not isinstance(parsed, dict):
+            raise ValueError(f"Vision {scope} output for page {page_number} was not an object")
+        if scope == "items" and not isinstance(parsed.get("items"), list):
+            raise ValueError(f"Vision item response for page {page_number} omitted the items array")
+        record["status"] = "completed"
+        return parsed
+    finally:
+        record["wall_seconds"] = round(perf_counter() - started, 3)
 
 
 def ask_visual(images: list[str] | str, page_number: int, page_count: int,
-               progress: Callable[[str], None] | None = None) -> dict[str, Any]:
+               progress: Callable[[str], None] | None = None,
+               diagnostics: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """Two bounded image reads avoid one huge, truncated full-invoice response."""
     images = [images] if isinstance(images, str) else images
     if progress:
         progress(f"Reading page {page_number}/{page_count}: header and totals")
     header_started = perf_counter()
-    header = _ask_scope(images, page_number, page_count, "header")
+    header = _ask_scope(images, page_number, page_count, "header", diagnostics=diagnostics)
     header_seconds = perf_counter() - header_started
     if progress:
         progress(f"Reading page {page_number}/{page_count}: item table")
     item_started = perf_counter()
     try:
-        items = _ask_scope(images, page_number, page_count, "items")
+        items = _ask_scope(images, page_number, page_count, "items", diagnostics=diagnostics)
     except (OSError, ValueError, RuntimeError) as error:
         raise VisionScopeError(str(error), header, page_number) from error
     item_seconds = perf_counter() - item_started
@@ -464,6 +496,8 @@ def parse_invoice_visual(pdf_path: str | Path, pages: list[dict[str, Any]],
     fallback["stage_timings"] = stage_timings
     if mode == "fast" or os.environ.get("USE_LOCAL_AI", "true").lower() in {"false", "0", "no"}:
         return fallback
+    diagnostics: list[dict[str, Any]] = []
+    fallback["vision_diagnostics"] = diagnostics
     try:
         parts = []
         render_started = perf_counter()
@@ -476,12 +510,16 @@ def parse_invoice_visual(pdf_path: str | Path, pages: list[dict[str, Any]],
             if progress:
                 progress(f"Reading original page {number} of {count} with vision AI")
             ai_started = perf_counter()
-            raw = ask_visual(images, number, count, progress=progress)
+            try:
+                raw = ask_visual(images, number, count, progress=progress, diagnostics=diagnostics)
+            finally:
+                ai_seconds += perf_counter() - ai_started
+                stage_timings.update(visual_render=round(render_seconds, 3),
+                                     visual_ai=round(ai_seconds, 3))
             scope_timings = raw.pop("_vision_timings", {})
             header_seconds += scope_timings.get("visual_header", 0)
             item_seconds += scope_timings.get("visual_items", 0)
             parts.append(normalize_full(raw, filename, language, number))
-            ai_seconds += perf_counter() - ai_started
             render_started = perf_counter()
         stage_timings.update(visual_render=round(render_seconds, 3),
                              visual_ai=round(ai_seconds, 3),
@@ -515,7 +553,7 @@ def parse_invoice_visual(pdf_path: str | Path, pages: list[dict[str, Any]],
         if issues or conflicts or reconciliation_notes:
             quality.update(needs_review=True, overall_status="needs_review")
         visual = {"data": data, "quality": quality, "stage_timings": stage_timings,
-                  "raw_visual_candidate": raw_visual}
+                  "raw_visual_candidate": raw_visual, "vision_diagnostics": diagnostics}
         # A visually plausible but column-shifted table must not supersede an
         # independently parsed one. Keep its candidate in detailed debug JSON.
         critical = any(issue.get("field") == "items.row_order" for issue in issues)

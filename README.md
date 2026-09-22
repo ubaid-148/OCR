@@ -57,6 +57,21 @@ before opening the PDF upload prompt.
 The sample check does not run live OCR; the first PDF upload does. After upload,
 the notebook prints the OCR device, pipeline version, and stage timings above the
 downloaded invoice JSON. Check that the device says `gpu:0` when testing on T4.
+The concise JSON also includes `date_of_supply`, `payment_method`,
+`customer.customer_code`, `customer.address`, and both parties' `commercial_registration`.
+Absent values remain null; vision's `cr_number` is exposed as `commercial_registration`.
+
+`Vision diagnostics` lists each page's header and item request separately, including
+wall time, server total time, model load, prompt evaluation, generation, and token counts.
+These records are also saved in `extraction_details.json` and the raw summary, including
+when vision is rejected or fails. Durations are seconds, converted from
+[Ollama's nanosecond metrics](https://github.com/ollama/ollama/blob/main/docs/api.md).
+Prompt evaluation is not an isolated measurement of image encoding; Ollama does not
+provide that separate metric, so `image_processing_seconds` stays null. Missing server
+metrics also stay null (for example, on timeout). Server phases are parts of request
+wall time, and should not be added to it. `visual_render` measures local PDF rendering.
+These diagnostics identify where time goes; they do not themselves speed up inference.
+
 If a GPU is unavailable, the notebook now falls back to CPU instead of stopping;
 the OCR result flow remains the same but takes longer.
 Focused retries now reread faint customer names and item descriptions from both
