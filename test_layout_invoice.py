@@ -198,8 +198,8 @@ class LayoutInvoiceTests(unittest.TestCase):
         parsed,header,h=table(words)
         self.assertEqual([row['item_code'] for row in parsed],['1212','1218','5007'])
         self.assertEqual([row['quantity'] for row in parsed],[2,1,1])
-        self.assertEqual([row['amount'] for row in parsed],[14.79,50.44,14.79])
-        self.assertEqual([row['vat_amount'] for row in parsed],[2.22,7.57,2.22])
+        self.assertEqual([row['amount'] for row in parsed],[29.58,50.44,14.79])
+        self.assertEqual([row['vat_amount'] for row in parsed],[4.44,7.57,2.22])
         self.assertEqual([row['gross_amount'] for row in parsed],[34.02,58.01,17.01])
         self.assertEqual(table_retry_reasons(words,parsed,header,h),[])
 
@@ -228,7 +228,7 @@ class LayoutInvoiceTests(unittest.TestCase):
         words += [ruled(text,*columns[key],360,columns[key][0]) for text,key in values]
         row=table(words)[0][0]
         self.assertEqual((row['item_code'],row['quantity'],row['unit_price'],row['amount'],row['vat_amount'],row['gross_amount']),
-                         ('1212',2,14.79,14.79,2.22,34.02))
+                         ('1212',2,14.79,29.58,4.44,34.02))
 
     def test_per_unit_printed_columns_validate_without_rewriting_source(self):
         data=dict(supplier={},customer={},invoice={},items=[

@@ -75,7 +75,7 @@ class InvoiceDetailsTests(unittest.TestCase):
         self.assertEqual(data['customer']['vat_number'],'300000000000003')
         self.assertEqual([item['item_code'] for item in data['items']],['A-1012','A-1018','A-5001'])
         self.assertEqual([item['quantity'] for item in data['items']],[2,1,1])
-        self.assertEqual(data['items'][0]['amount'],10)
+        self.assertEqual(data['items'][0]['amount'],20)
         self.assertEqual(data['totals']['subtotal'],50)
         self.assertEqual(data['totals']['vat_amount'],7.5)
         self.assertEqual(data['totals']['net_amount'],57.5)

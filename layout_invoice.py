@@ -22,7 +22,7 @@ ALIASES = {
 
 INVOICE_LABELS = (
     'invoice no','invoice number','inv no','invoice serial','invoice serial no','serial invoice no',
-    'رقم الفاتورة','مسلسل الفاتورة','تسلسل الفاتورة','رقم مسلسل الفاتورة','رقم تسلسل الفاتورة','الرقم التسلسلي للفاتورة',
+    'رقم الفاتورة','مسلسل الفاتورة','تسلسل الفاتورة','تسلسلالفاتورة','رقم مسلسل الفاتورة','رقم تسلسل الفاتورة','الرقم التسلسلي للفاتورة',
 )
 DATE_LABELS = (
     'date','dated','invoice date','issue date','date and time','التاريخ','تاريخ','تاريخ الفاتورة',
@@ -30,7 +30,7 @@ DATE_LABELS = (
 )
 SUPPLY_DATE_LABELS = (
     'supply date','date of supply','delivery date',
-    'تاريخ التوريد','تاريخ التسليم',
+    'تاريخ التوريد','تاريخ المتوريد','تاريخالتوريد','تاريخ التسليم',
 )
 CUSTOMER_SECTION_LABELS = (
     'buyer','bill to','customer','customer details','customer name','cust name','cust.name','custname','customer code','cus code',
@@ -431,6 +431,18 @@ def table(words):
                 elif calculated is not None and tv is not None and gross is not None:
                     if abs(calculated+Decimal(str(tv))-Decimal(str(gross)))<=Decimal('.02'):
                         av=float(calculated);derived=True
+            elif qty is not None and pv is not None and av is not None and gross is not None and qty > 1:
+                # A common RTL table OCR failure copies the first row's
+                # per-unit amount into the line amount. A printed gross total
+                # lets us solve the row instead of discarding its price.
+                expected=Decimal(str(qty))*Decimal(str(pv))-Decimal(str(dv or 0))
+                implied_vat=Decimal(str(gross))-expected
+                if (abs(Decimal(str(av))-Decimal(str(pv)))<=Decimal('.05') and
+                        implied_vat >= 0 and
+                        abs(implied_vat-expected*Decimal('.15'))<=Decimal('.05')):
+                    av=float(expected.quantize(Decimal('.01')))
+                    tv=float(implied_vat.quantize(Decimal('.01')))
+                    derived=True
             # Reject impossible row assignments before surfacing them. This keeps
             # mis-associated OCR values out of the final item list without
             # discarding the spatial evidence needed for review.
@@ -551,8 +563,19 @@ def parse_layout(pages,filename,language):
         if label is None:return None
         candidates=[w for w in pool if w is not label and predicate(w['text']) and
                     (abs(y(w)-y(label))<=h*.95 or 0<y(w)-y(label)<=h*below and abs(w['left']-label['left'])<h*3)]
+        def distance(word):
+            # Arabic forms print the value to the left of its label; English
+            # forms usually print it to the right. Keep both directions.
+            lx=label['left']; right=label['left']+label['width']
+            if word['left']+word['width']<=lx+h*.25:
+                horizontal=lx-(word['left']+word['width'])
+            elif word['left']>=right-h*.25:
+                horizontal=word['left']-right
+            else:
+                horizontal=0
+            return abs(y(word)-y(label))*4+max(0,horizontal)
         return min(candidates,key=lambda w:(float(w.get('height',h))>h*1.8,abs(y(w)-y(label))>h*.95,
-                                            abs(y(w)-y(label))*4+abs(w['left']-label['left']),w['text']),default=None)
+                                            distance(w),w['text']),default=None)
     inv=None;date=None;time=None;supply_date=None
     # A label can sort before its recovered value (especially on skewed pages).
     # Select the accepted printed crop before considering base-OCR handwriting.
@@ -639,6 +662,9 @@ def parse_layout(pages,filename,language):
     customer_name=keep('customer.name',buyer_name,customer_value)
     if buyer_name and buyer_name.get('source')!='native_text' and buyer_name.get('confidence',0)<80:
         customer_name=None
+    customer_code_label=next((w for w in words if contains(w['text'],('customer code','cus code','customer no','كود العميل','رقم العميل'))),None)
+    customer_code_word=near(customer_code_label,lambda s:bool(re.fullmatch(r'\d{3,10}',normalize(s).strip(' :#'))),below=2)
+    customer_code=keep('customer.customer_code',customer_code_word,normalize(customer_code_word['text']).strip(' :#')) if customer_code_word else None
     vats=[(w,number_string(w['text'],{15})) for w in words];vats=[(w,v) for w,v in vats if v]
     sv=next(((w,v) for w,v in vats if not buyer or y(w)<y(buyer)),(None,None))
     explicit_customer=next(((w,v) for w,v in vats if contains(w['text'],CUSTOMER_VAT_LABELS)),None)
@@ -666,13 +692,18 @@ def parse_layout(pages,filename,language):
                      not arabic and len(re.findall('[A-Z]',w['text']))>15)]
         retry_kind='supplier_name_ar' if arabic else 'supplier_name_en'
         w=min(candidates,key=lambda w:(w.get('retry_kind')!=retry_kind,y(w),-w['width']),default=None)
+        if w is None and not arabic:
+            candidates=[w for w in header if not has_arabic(w['text']) and
+                        len(re.findall(r'[A-Za-z]',w['text']))>=12 and
+                        not contains(w['text'],('invoice','tax invoice','supplier','seller'))]
+            w=max(candidates,key=lambda word:(len(re.findall(r'[A-Za-z]',word['text'])),word['width']),default=None)
         return keep('supplier.name_ar' if arabic else 'supplier.name_en',w)
     name_ar,name_en=company(True),company(False)
     pay_label=next((w for w in words if contains(w['text'],('payment method','payment mthd','payment methd','payment type','طريقة الدفع','نوع الدفع'))),None)
-    pay=next((w for w in words if contains(w['text'],('cash','card','credit','mada','span','network','بالنقد','نقدي','بطاقة','مدى'))),None)
+    pay=next((w for w in words if contains(w['text'],('cash','card','credit','mada','span','network','بالنقد','نقدي','بطاقة','مدى','شبكة مدي','شبكةمدي'))),None)
     if pay_label:
-        pay=pay_label if any(token in normalize(pay_label['text']).casefold() for token in ('cash','card','credit','mada','span','بالنقد','نقدي','بطاقة','مدى')) else near(
-            pay_label,lambda s:contains(s,('cash','card','credit','mada','span','network','بالنقد','نقدي','بطاقة','مدى')),below=2)
+        pay=pay_label if any(token in normalize(pay_label['text']).casefold() for token in ('cash','card','credit','mada','span','بالنقد','نقدي','بطاقة','مدى','شبكةمدي')) else near(
+            pay_label,lambda s:contains(s,('cash','card','credit','mada','span','network','بالنقد','نقدي','بطاقة','مدى','شبكة مدي','شبكةمدي')),below=2)
     payment=None
     if pay:
         raw_payment=normalize(pay['text']).strip(' :')
@@ -754,6 +785,6 @@ def parse_layout(pages,filename,language):
     return dict(document_type='invoice',document_language=language.split('+'),source_filename=filename,
                 supplier=dict(name_ar=name_ar,name_en=name_en,vat_number=supplier_vat),
                 invoice=dict(invoice_number=inv,date=date,date_of_supply=supply_date,hijri_date=None,time=time,payment_method=payment),
-                customer=dict(name=customer_name,vat_number=customer_vat,address=customer_address),items=items,
+                customer=dict(name=customer_name,customer_code=customer_code,vat_number=customer_vat,address=customer_address),items=items,
                 totals=dict(subtotal=subtotal,discount=total('totals.discount',('discount','discounts','dscounts','خصم','الخصومات','الحسم')),vat_rate=rate,vat_amount=vat,net_amount=net,currency=currency),
                 field_evidence=evidence,receipt_regions=receipts)

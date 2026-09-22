@@ -572,6 +572,11 @@ def merge_retries(page, retries):
             if word.get('confidence',0)<confidence_floor:continue
             if kind=='vat_identifier' and re.search(r'(?<!\d)\d{15}(?!\d)',text):
                 candidates.append(word)
+            elif kind=='vat_identifier' and (re.search(r'(?i)cus\.?\s*code|كود\s*العميل',text) or
+                                             retry.get('original',{}).get('text','').find('كود العميل')>=0):
+                code=re.search(r'(?<!\d)\d{3,10}(?!\d)',text)
+                if code:
+                    candidates.append(dict(word,text=code[0],raw_text=text))
             elif kind=='invoice_identifier':
                 ids=re.findall(r'\b[A-Za-z]{2,}[-/][A-Za-z0-9/-]*\d[A-Za-z0-9/-]*\b',text)
                 if len(ids)==1:
@@ -585,6 +590,11 @@ def merge_retries(page, retries):
             elif kind=='footer_discount' and numeric(text) is not None:
                 candidates.append(word)
             elif kind in {'table_cells','table_area'}:
+                cleaned=text.strip(' :')
+                if (cleaned.casefold() in {'r','sa','summ',':tota','tota'} or
+                        contains(cleaned,('vat summary','tax summary','ملخص ضريبة القيمة المضافة')) or
+                        re.match(r'^[yY]\s*ملخص',cleaned)):
+                    continue
                 candidates.append(word)
             elif kind=='footer_totals' and (numeric(text) is not None or re.search(r'[A-Za-z]{3,}',text)):
                 candidates.append(word)
@@ -627,6 +637,14 @@ def merge_retries(page, retries):
             new_letters=sum(len(re.findall(alphabet,w['text'])) for w in candidates)
             if original in words and float(original.get('confidence') or 0)<80 and new_letters>=max(3,old_letters*.7):
                 words.remove(original)
+        if kind=='customer_name_ar' and candidates:
+            original=retry['original']
+            # A focused crop must not replace a complete base-OCR name with
+            # the truncated prefix produced by a mis-sized RTL crop.
+            original_letters=len(re.findall(r'[\u0600-\u06ff]',original.get('text','')))
+            candidates=[w for w in candidates if len(re.findall(r'[\u0600-\u06ff]',w['text']))>=original_letters]
+            if not candidates:
+                continue
         for w in candidates:
             # Do not duplicate a successfully read same-language source phrase.
             if any(w['text'].casefold()==old['text'].casefold() and abs(center(w)[1]-center(old)[1])<old.get('height',20) and abs(center(w)[0]-center(old)[0])<max(w.get('width',1),old.get('width',1))*.5 for old in words):continue
