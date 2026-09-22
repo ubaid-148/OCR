@@ -103,13 +103,16 @@ Colab now uses the same checked image-reading flow as the web application.
 Cell 1 uses `PROJECT_REF=main`. Reopen this updated notebook;
 if your existing runtime has a clone of another branch, use a fresh runtime.
 
-## No training workflow
+## Training workflow
 
-This repository does not train or fine-tune a model. The 111 PDFs in
-`public_invoice_pdfs/` were explicitly authorized for public distribution and
-are source documents for Colab diagnostics, not verified labels. OCR and stock
-vision outputs remain drafts: arithmetic, positioned evidence, and
-`needs_review` are required before using extracted financial data.
+Use the separate [T4 training notebook](https://colab.research.google.com/github/ubaid-148/OCR/blob/main/colab_train.ipynb)
+and [training guide](training/README.md) to prepare page images, review model drafts,
+train a Qwen3-VL-4B LoRA adapter, and compare held-out predictions. The 111 sample
+PDFs contain 115 pages; they are source documents, not verified labels. Training
+requires checked JSON and a CUDA runtime. No adapter has been trained or measured
+as part of the local workflow setup. Draft OCR/vision outputs are never automatically
+accepted as training truth. Production extraction still uses arithmetic,
+positioned evidence and `needs_review`.
 
 ## Flow
 
