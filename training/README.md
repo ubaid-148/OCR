@@ -26,9 +26,9 @@ page training label, and is not silently promoted into training data.
 
 1. Prepare: `python -m training.data prepare`. Creates page images, contact sheets,
    source hashes and draft JSON in ignored `training_workspace/review/`.
-2. Optional draft generation: `python -m training.run draft --limit 5` on T4.
+2. Optional draft generation: `python -u -m training.run draft --pdf 9479.pdf --limit 1 --force` on T4.
    Qwen3-VL suggests page-local header and item JSON. `--limit 0` processes all
-   remaining pages and can take hours. This is inference, not training.
+   remaining pages and can take hours. Test one page first. This is inference, not training.
 3. Open `training.review.review(workspace)` in the notebook. Use **Load model
    draft**, compare with the page, correct fields, set a consistent layout group
    and reviewer, then save. Rotate pages if needed. Only mark a page verified
@@ -70,3 +70,18 @@ necessary; no training set guarantees zero missing fields on arbitrary invoices.
 [PEFT quantized training](https://huggingface.co/docs/peft/developer_guides/quantization).
 The training dependencies are isolated in `training/requirements.txt`; the OCR
 notebook and its dependencies are unchanged.
+
+## Bounded draft generation
+
+Header prompts now list allowed fields instead of embedding the full JSON Schema.
+Generation stops on a completed JSON object, a scope token budget (header 1024,
+items 2048), or a 120-second time budget. The time budget is checked between decoding
+steps and excludes downloads/model loading; it cannot interrupt a stuck GPU operation.
+Progress prints roughly every 15 seconds while decoding. Prediction files include
+raw output, token counts, stop reason and generation/input timings. Invalid or
+incomplete output is preserved as an error, never repaired into a training label.
+`--pdf 9479.pdf --limit 1 --force` regenerates only its suggestions and keeps manually
+edited targets and verified pages unchanged. Live T4 accuracy and speed require a
+new run; bounding latency does not establish correct extraction.
+
+Stopping uses the [Transformers generation API](https://huggingface.co/docs/transformers/v4.57.1/en/internal/generation_utils#transformers.StoppingCriteria).

@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 from time import perf_counter
 
+from training.generation import GenerationMonitor, complete_object
 from training.draft_checks import draft_warnings
 from training.data import digest, export, instruction, write_json, validate_schema, HEADER_SCHEMA, ITEMS_SCHEMA
 
@@ -19,6 +20,8 @@ def load_runtime(adapter=None):
     from transformers import AutoProcessor, BitsAndBytesConfig, Qwen3VLForConditionalGeneration
     if not torch.cuda.is_available():
         raise RuntimeError("A CUDA GPU is required. Select a T4 in a fresh Colab runtime.")
+    print("Loading Qwen3-VL weights (first run may download)...", flush=True)
+    load_started = perf_counter()
     model = Qwen3VLForConditionalGeneration.from_pretrained(
         BASE_MODEL, quantization_config=BitsAndBytesConfig(load_in_4bit=True,
             bnb_4bit_quant_type="nf4", bnb_4bit_use_double_quant=True,
@@ -28,6 +31,7 @@ def load_runtime(adapter=None):
     if adapter:
         from peft import PeftModel
         model = PeftModel.from_pretrained(model, adapter)
+    print(f"Model ready on {torch.cuda.get_device_name(0)} after {perf_counter()-load_started:.1f}s", flush=True)
     return model, processor
 
 
@@ -132,34 +136,75 @@ def train(args):
     print("Adapter saved:", adapter_dir)
 
 
-def generate(model, processor, workspace, row, max_tokens):
+def generate(model, processor, workspace, row, max_tokens, max_seconds=120, diagnostics=None):
     import torch
+    from transformers import StoppingCriteria, StoppingCriteriaList
+    encode_started = perf_counter()
     inputs = encode(processor, workspace, row).to("cuda")
+    input_seconds = perf_counter() - encode_started
+    prompt_length = inputs["input_ids"].shape[1]
+    monitor = GenerationMonitor(max_seconds)
     started = perf_counter()
+
+    class StopDraft(StoppingCriteria):
+        def __call__(self, input_ids, scores, **kwargs):
+            count = input_ids.shape[1] - prompt_length
+            elapsed = perf_counter() - started
+            # Decode periodically, or at the deadline. This is batch-size one.
+            text = processor.decode(input_ids[0, prompt_length:], skip_special_tokens=True) if count % 16 == 0 or elapsed >= max_seconds else ""
+            stop = monitor.check(text, count, elapsed)
+            return torch.full((input_ids.shape[0],), stop, dtype=torch.bool, device=input_ids.device)
+
     with torch.inference_mode():
-        output = model.generate(**inputs, max_new_tokens=max_tokens, do_sample=False, use_cache=True)
-    continuation = output[0, inputs["input_ids"].shape[1]:]
-    text = processor.decode(continuation, skip_special_tokens=True)
-    return text, perf_counter()-started
+        output = model.generate(**inputs, max_new_tokens=max_tokens, do_sample=False,
+                                use_cache=True, stopping_criteria=StoppingCriteriaList([StopDraft()]))
+    continuation = output[0, prompt_length:]
+    raw = processor.decode(continuation, skip_special_tokens=True)
+    completed = complete_object(raw)
+    elapsed = perf_counter() - started
+    reason = monitor.reason or ("json_complete" if completed else
+                                "token_limit" if len(continuation) >= max_tokens else "eos")
+    if diagnostics is not None:
+        diagnostics.update(generated_tokens=len(continuation), token_limit=max_tokens,
+                           stop_reason=reason, input_seconds=round(input_seconds, 3),
+                           raw_text=raw, generation_seconds=round(elapsed, 3))
+    return completed or raw, elapsed
 
 
 def draft(args):
+    paths = sorted((Path(args.workspace)/"labels").glob("*.json"))
+    selected = []
+    for path in paths:
+        record = json.loads(path.read_text())
+        if args.pdf and record.get("pdf") != args.pdf:
+            continue
+        if record.get("status") == "verified":
+            continue
+        if not args.force and record.get("draft_model") and not record.get("draft_errors"):
+            continue
+        selected.append(path)
+    if not selected:
+        print("No matching unverified pages to draft. No model loaded.", flush=True)
+        return
     model, processor = load_runtime()
     model.eval()
-    paths = sorted((Path(args.workspace)/"labels").glob("*.json"))
+    paths = selected
     done = 0
     for path in paths:
         record = json.loads(path.read_text())
-        if record.get("status") == "verified" or (record.get("draft_model") and not record.get("draft_errors")):
-            continue
         candidate, errors = {}, []
         for scope in ("header", "items"):
             print(f"{path.name}: reading {scope}...", flush=True)
             row = dict(record, scope=scope, prompt=instruction(scope, record["page"], record["page_count"]))
-            text, elapsed = generate(model, processor, args.workspace, row, args.max_tokens)
-            print(f"{path.name}: {scope} generation took {elapsed:.1f}s", flush=True)
-            write_json(path.with_suffix(f".{scope}.prediction"), {"text": text, "seconds": elapsed})
+            metrics = {}
+            budget = min(args.max_tokens, args.header_tokens if scope == "header" else args.item_tokens)
+            text, elapsed = generate(model, processor, args.workspace, row, budget,
+                                     args.generation_seconds, diagnostics=metrics)
+            print(f"{path.name}: {scope} {elapsed:.1f}s; {metrics['generated_tokens']} tokens; {metrics['stop_reason']}", flush=True)
+            write_json(path.with_suffix(f".{scope}.prediction"), {"text": text, "seconds": elapsed, **metrics})
             try:
+                if metrics["stop_reason"] in {"time_limit", "token_limit"}:
+                    raise ValueError(f"Incomplete output: {metrics['stop_reason']} after {metrics['generated_tokens']} tokens")
                 parsed = json.loads(text)
                 validate_schema(parsed, HEADER_SCHEMA if scope == "header" else ITEMS_SCHEMA)
                 candidate.update(parsed)
@@ -233,8 +278,15 @@ def main():
     parser.add_argument("--resume")
     parser.add_argument("--epochs", type=float, default=2)
     parser.add_argument("--max-tokens", type=int, default=4096)
-    parser.add_argument("--limit", type=int, default=5, help="Draft pages per run; 0 = all")
+    parser.add_argument("--pdf", help="Draft only this filename, e.g. 9479.pdf")
+    parser.add_argument("--force", action="store_true", help="Refresh suggestions; never overwrite verified labels or manual targets")
+    parser.add_argument("--header-tokens", type=int, default=1024)
+    parser.add_argument("--item-tokens", type=int, default=2048)
+    parser.add_argument("--generation-seconds", type=float, default=120)
+    parser.add_argument("--limit", type=int, default=1, help="Draft pages per run; 0 = all")
     args = parser.parse_args()
+    if min(args.max_tokens, args.header_tokens, args.item_tokens, args.generation_seconds) <= 0 or args.limit < 0:
+        parser.error("Token/time limits must be positive; page limit must be nonnegative")
     {"draft": draft, "train": train, "evaluate": evaluate}[args.action](args)
 
 

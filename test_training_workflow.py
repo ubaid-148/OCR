@@ -106,7 +106,7 @@ class TrainingDataTests(unittest.TestCase):
         notebook = json.loads(Path("colab_train.ipynb").read_text())
         for cell in notebook["cells"]:
             source = "".join(cell["source"])
-            if cell["cell_type"] == "code" and ("DRAFT_LIMIT = 5" in source or "from training.review import review" in source):
+            if cell["cell_type"] == "code" and ("DRAFT_LIMIT = 1" in source or "from training.review import review" in source):
                 with patch("pathlib.Path.is_file", return_value=False):
                     with self.assertRaisesRegex(RuntimeError, "Run Step 1"):
                         exec(compile(source, "cell", "exec"), {})
@@ -123,6 +123,49 @@ class TrainingDataTests(unittest.TestCase):
         target["items"] = [{"quantity": 20, "unit_price": 2.35, "amount": None,
                             "vat_amount": 7.05, "gross_amount": 54.05}]
         self.assertFalse(any("items[" in warning for warning in draft_warnings(target)))
+
+    def test_generation_stops_only_on_complete_object_or_time_limit(self):
+        from training.generation import GenerationMonitor, complete_object
+        self.assertIsNone(complete_object('{"invoice":{"date":"2026'))
+        self.assertIsNone(complete_object('Explanation {"invoice":{}}'))
+        self.assertEqual(complete_object('```json\n{"x":"brace } inside text"}\n```'), '{"x":"brace } inside text"}')
+        monitor = GenerationMonitor(120)
+        self.assertFalse(monitor.check('{"invoice":', 10, 1))
+        self.assertTrue(monitor.check('{"invoice":', 1024, 121))
+        self.assertEqual(monitor.reason, "time_limit")
+        monitor = GenerationMonitor(120)
+        self.assertTrue(monitor.check('{"invoice":{}}', 12, 3))
+        self.assertEqual(monitor.reason, "json_complete")
+
+    def test_targeted_draft_skips_verified_pages_before_model_load(self):
+        from training.run import draft
+        from types import SimpleNamespace
+        self.record("a", "seller-a")
+        args = SimpleNamespace(workspace=self.workspace, pdf="a.pdf", force=True)
+        with patch("training.run.load_runtime") as load:
+            draft(args)
+        load.assert_not_called()
+
+    def test_generation_timeout_keeps_manual_target_and_records_error(self):
+        from training.run import draft
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        original = self.record("a", "seller-a", status="draft")
+        self.record("b", "seller-b", status="draft")
+        args = SimpleNamespace(workspace=self.workspace, pdf="a.pdf", force=True,
+                               limit=1, max_tokens=4096, header_tokens=1024, item_tokens=2048,
+                               generation_seconds=120)
+        def generate(model, processor, workspace, row, budget, seconds, diagnostics):
+            diagnostics.update(generated_tokens=1024, stop_reason="time_limit")
+            return '{"supplier":', 120
+        with patch("training.run.load_runtime", return_value=(Mock(), Mock())), \
+             patch("training.run.generate", side_effect=generate):
+            draft(args)
+        result = json.loads((self.workspace / "labels/a-1.json").read_text())
+        self.assertEqual(result["target"], original["target"])
+        self.assertEqual(len(result["draft_errors"]), 2)
+        self.assertEqual(result["suggested_target"], {})
+        self.assertNotIn("draft_model", json.loads((self.workspace / "labels/b-1.json").read_text()))
 
     def test_notebook_python_cells_compile(self):
         notebook = json.loads(Path("colab_train.ipynb").read_text())
