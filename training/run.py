@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 from time import perf_counter
 
+from training.draft_checks import draft_warnings
 from training.data import digest, export, instruction, write_json, validate_schema, HEADER_SCHEMA, ITEMS_SCHEMA
 
 BASE_MODEL = "Qwen/Qwen3-VL-4B-Instruct"
@@ -153,8 +154,10 @@ def draft(args):
             continue
         candidate, errors = {}, []
         for scope in ("header", "items"):
+            print(f"{path.name}: reading {scope}...", flush=True)
             row = dict(record, scope=scope, prompt=instruction(scope, record["page"], record["page_count"]))
             text, elapsed = generate(model, processor, args.workspace, row, args.max_tokens)
+            print(f"{path.name}: {scope} generation took {elapsed:.1f}s", flush=True)
             write_json(path.with_suffix(f".{scope}.prediction"), {"text": text, "seconds": elapsed})
             try:
                 parsed = json.loads(text)
@@ -166,6 +169,7 @@ def draft(args):
         record["suggested_target"] = candidate
         record["draft_model"] = BASE_MODEL
         record["draft_errors"] = errors
+        record["draft_warnings"] = draft_warnings(candidate)
         write_json(path, record)
         print(path.name, "draft saved for review", errors, flush=True)
         done += 1

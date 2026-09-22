@@ -111,6 +111,19 @@ class TrainingDataTests(unittest.TestCase):
                     with self.assertRaisesRegex(RuntimeError, "Run Step 1"):
                         exec(compile(source, "cell", "exec"), {})
 
+    def test_partial_draft_warns_without_rewriting_amounts(self):
+        from training.draft_checks import draft_warnings
+        target = blank_target()
+        target["items"] = [{"quantity": 20, "unit_price": 2.35, "amount": 54.05}]
+        warnings = draft_warnings(target)
+        self.assertTrue(any("invoice:" in warning for warning in warnings))
+        self.assertTrue(any("column roles" in warning for warning in warnings))
+        self.assertEqual(target["items"][0]["amount"], 54.05)
+        # Correct printed gross does not have to equal the pre-tax extension.
+        target["items"] = [{"quantity": 20, "unit_price": 2.35, "amount": None,
+                            "vat_amount": 7.05, "gross_amount": 54.05}]
+        self.assertFalse(any("items[" in warning for warning in draft_warnings(target)))
+
     def test_notebook_python_cells_compile(self):
         notebook = json.loads(Path("colab_train.ipynb").read_text())
         for index, cell in enumerate(notebook["cells"]):

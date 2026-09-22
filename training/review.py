@@ -2,6 +2,7 @@
 import json
 from pathlib import Path
 
+from training.draft_checks import draft_warnings
 from training.data import FULL_SCHEMA, validate_schema, write_json
 
 
@@ -31,6 +32,14 @@ def review(workspace):
             with Image.open(workspace / state["record"]["image"]) as image:
                 display(image.rotate(rotation.value, expand=True))
 
+    def show_warnings(target):
+        with messages:
+            clear_output()
+            for error in state["record"].get("draft_errors", []):
+                print("Generation error:", error)
+            for warning in draft_warnings(target):
+                print("Review:", warning)
+
     def load(*_):
         record = json.loads(Path(picker.value).read_text())
         state["record"] = record
@@ -40,6 +49,7 @@ def review(workspace):
         verified.value = record.get("status") == "verified"
         rotation.value = record.get("rotation_ccw", 0)
         show_image()
+        show_warnings(record["target"])
 
     def persist(_):
         with messages:
@@ -67,6 +77,7 @@ def review(workspace):
             target = dict(state["record"]["target"], **candidate)
             editor.value = json.dumps(target, ensure_ascii=False, indent=2)
             verified.value = False
+            show_warnings(target)
 
     suggestion.on_click(use_suggestion)
     picker.observe(load, names="value")

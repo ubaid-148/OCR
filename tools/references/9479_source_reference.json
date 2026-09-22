@@ -1,0 +1,39 @@
+{
+  "reference_status": "source_verified_partial",
+  "source_sha256": "d2f52033b562eb9ef163333b9d3d4055fe740799ad87d4bc9c4ebf1395ce28bf",
+  "reference_scope": "Manually checked selected printed fields only; not a complete training label. Net row values are not printed separately.",
+  "invoice_number": "175583",
+  "invoice_date": "10-03-2026",
+  "supplier_name_en": "Bassam Sharq For Trading Est.",
+  "supplier_vat_number": "311490877600003",
+  "customer_vat_number": "300402905100003",
+  "items": [
+    {
+      "description": "SAND NORMAL (BAG)",
+      "quantity": 20,
+      "unit": "BAG",
+      "unit_price": 2.35,
+      "amount": null,
+      "vat_rate": 15,
+      "vat_amount": 7.05,
+      "gross_amount": 54.05
+    },
+    {
+      "description": "CEMENT NORMAL (SAUDI)",
+      "quantity": 4,
+      "unit": "BAG",
+      "unit_price": 14.79,
+      "amount": null,
+      "vat_rate": 15,
+      "vat_amount": 8.87,
+      "gross_amount": 68.03
+    }
+  ],
+  "totals": {
+    "subtotal": 106.16,
+    "discount": 0,
+    "vat_amount": 15.92,
+    "net_amount": 122.08,
+    "currency": "SAR"
+  }
+}
