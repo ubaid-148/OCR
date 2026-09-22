@@ -16,3 +16,5 @@ model_artifacts/
 checkpoints/
 *.safetensors
 adapter_model.bin
+
+.training-setup-ready

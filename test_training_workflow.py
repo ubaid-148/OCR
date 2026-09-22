@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from training.data import blank_target, digest, export, split_records, validate_schema, verified_records, write_json
 from visual_invoice import FULL_SCHEMA
@@ -100,6 +101,15 @@ class TrainingDataTests(unittest.TestCase):
     def test_at_least_three_groups_required(self):
         with self.assertRaisesRegex(ValueError, "at least 3"):
             split_records([self.record("a", "seller-a")])
+
+    def test_draft_and_review_without_setup_report_actionable_error(self):
+        notebook = json.loads(Path("colab_train.ipynb").read_text())
+        for cell in notebook["cells"]:
+            source = "".join(cell["source"])
+            if cell["cell_type"] == "code" and ("DRAFT_LIMIT = 5" in source or "from training.review import review" in source):
+                with patch("pathlib.Path.is_file", return_value=False):
+                    with self.assertRaisesRegex(RuntimeError, "Run Step 1"):
+                        exec(compile(source, "cell", "exec"), {})
 
     def test_notebook_python_cells_compile(self):
         notebook = json.loads(Path("colab_train.ipynb").read_text())
