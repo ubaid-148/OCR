@@ -230,6 +230,8 @@ class InvoiceRegionTests(unittest.TestCase):
         self.assertEqual(item['gross_amount'],552)
         self.assertEqual(item['vat_amount'],72)
         self.assertEqual(item['amount_source'],'derived_quantity_price')
+        self.assertEqual(item['printed_amount'],552)
+        self.assertEqual(item['printed_vat_amount'],72)
         self.assertNotIn('amount',item['field_evidence'])
 
     def test_corrupt_numeric_suffix_is_not_silently_a_unit(self):

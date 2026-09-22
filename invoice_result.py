@@ -42,6 +42,17 @@ def extract_result(payload, filename, language="eng+ara", *, pdf_path=None, mode
         notes.append("Item arithmetic or totals could not be fully verified.")
     if quality.get("targeted_ocr_errors"):
         notes.append("Some focused OCR retries failed; check missing values.")
+    optional_fields = {
+        "invoice.date_of_supply": data.get("invoice", {}).get("date_of_supply"),
+        "invoice.payment_method": data.get("invoice", {}).get("payment_method"),
+        "supplier.commercial_registration": data.get("supplier", {}).get("commercial_registration"),
+        "customer.commercial_registration": data.get("customer", {}).get("commercial_registration"),
+        "customer.customer_code": data.get("customer", {}).get("customer_code"),
+        "customer.address": data.get("customer", {}).get("address"),
+    }
+    missing_optional = [field for field, value in optional_fields.items() if value in (None, "", [])]
+    if missing_optional:
+        notes.append("Optional printed fields not included: " + ", ".join(missing_optional))
     needs_review = quality.get("needs_review", True) or bool(notes)
     if needs_review and not notes:
         notes.append("Check extracted values against the PDF.")
@@ -51,7 +62,8 @@ def extract_result(payload, filename, language="eng+ara", *, pdf_path=None, mode
         "invoice_date": data.get("invoice", {}).get("date"),
         "supplier": select(data.get("supplier", {}), ("name_ar", "name_en", "vat_number")),
         "customer": select(data.get("customer", {}), ("name", "vat_number")),
-        "items": [select(item, ("item_code", "description", "quantity", "unit_price", "amount", "vat_amount", "gross_amount"))
+        "items": [select(item, ("item_code", "description", "quantity", "unit_price", "amount", "vat_amount", "gross_amount",
+                    "printed_amount", "printed_vat_amount", "amount_source"))
                   for item in data.get("items", [])],
         "totals": select(data.get("totals", {}), ("subtotal", "discount", "vat_rate", "vat_amount", "net_amount", "currency")),
         "review_notes": list(dict.fromkeys(notes)),

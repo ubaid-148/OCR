@@ -420,6 +420,8 @@ def table(words):
             gross_word=cell('gross_amount')
             unit_word=min((w for w in row if 'unit' in hx and abs(column_x(w)-hx['unit'])<tolerance('unit') and re.fullmatch(r'(?i)pcs?\.?|sets?|kg|m|ltr|box|roll',w['text'].strip())),key=lambda w:abs(column_x(w)-hx['unit']),default=None)
             derived=False;total_is_pretax=False
+            printed_amount=av
+            printed_vat_amount=tv
             gross=av if gross_column else numeric(gross_word['text']) if gross_word else None
             if gross_column:
                 av=None
@@ -456,6 +458,8 @@ def table(words):
             items.append(dict(line_no=len(items)+1,item_code=normalize(code['text']) if code and (code.get('source')=='native_text' or code.get('confidence',0)>=85) else None,
                 description=' '.join(w['text'] for w in sorted(desc,key=lambda w:(round(y(w)/h),-w['left'] if rtl_description else w['left']))),
                 quantity=qty,unit=unit_word['text'] if unit_word else None,unit_price=pv,amount=av,vat_amount=tv,discount=dv,gross_amount=gross,
+                printed_amount=printed_amount if derived else None,
+                printed_vat_amount=printed_vat_amount if derived else None,
                 amount_source='derived_quantity_price' if derived else 'printed' if av is not None else None,
                 field_evidence=ev))
         if items:

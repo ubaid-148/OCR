@@ -178,7 +178,7 @@ def parse_invoice_hybrid(pages, source_filename, language, mode='auto'):
     result=_parse_invoice_hybrid(clean,source_filename,language,mode)
     add_printed_details(result['data'],clean)
     for item in result['data'].get('items',[]):
-        for key in ('vat_amount','discount','gross_amount','amount_source'):
+        for key in ('vat_amount','discount','gross_amount','amount_source','printed_amount','printed_vat_amount'):
             item.setdefault(key,None)
         item.setdefault('field_evidence',{})
     quality=result['quality']
