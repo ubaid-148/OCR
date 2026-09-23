@@ -243,9 +243,26 @@ def _record_ollama_metrics(record: dict[str, Any], response: dict[str, Any]) -> 
     record["done_reason"] = response.get("done_reason")
 
 
+def _scope_budget(scope):
+    if scope == "header":
+        return int(os.environ.get("OLLAMA_HEADER_NUM_PREDICT", "8192"))
+    return int(os.environ.get("OLLAMA_NUM_PREDICT", "4096"))
+
+
+def vision_attempt_summary(records):
+    """Wall time accounting; retry time overlaps total and is not additive."""
+    seconds = lambda subset: round(sum(float(r.get('wall_seconds') or 0) for r in subset), 3)
+    failed = [r for r in records if r.get('status') == 'failed']
+    retries = [r for r in records if r.get('is_retry')]
+    return {'attempt_count': len(records), 'failed_attempt_count': len(failed),
+            'retry_attempt_count': len(retries), 'total_vision_seconds': seconds(records),
+            'failed_attempt_seconds': seconds(failed), 'retry_attempt_seconds': seconds(retries),
+            'wasted_retry_seconds': seconds([r for r in records if r.get('retried')])}
+
+
 def _ask_scope(images: list[str], page_number: int, page_count: int,
                scope: str, diagnostics: list[dict[str, Any]] | None = None, *,
-               instruction: str = "", max_output_tokens: int | None = None) -> dict[str, Any]:
+               instruction: str = "", max_output_tokens: int | None = None, attempt: int = 1) -> dict[str, Any]:
     if scope == "header":
         schema = HEADER_SCHEMA
         scope_images = images[:1]
@@ -284,7 +301,7 @@ def _ask_scope(images: list[str], page_number: int, page_count: int,
                'Do not guess missing values or calculate unprinted quantities or prices. '
                'A blank cell is null, never zero. Omit absent fields instead of generating null lists.')
     model = os.environ.get("OLLAMA_MODEL", "qwen3-vl:4b")
-    predict_limit = max_output_tokens or int(os.environ.get("OLLAMA_NUM_PREDICT", "4096"))
+    predict_limit = max_output_tokens or _scope_budget(scope)
     body = {
         "model": model, "stream": False, "format": schema, "keep_alive": "30m",
         "options": {"temperature": 0, "num_ctx": int(os.environ.get("OLLAMA_NUM_CTX", "16384")),
@@ -292,7 +309,7 @@ def _ask_scope(images: list[str], page_number: int, page_count: int,
         "messages": [{"role": "user", "content": prompt, "images": scope_images}],
     }
     record = {"page": page_number, "scope": scope, "model": model,
-              "image_count": len(scope_images), "status": "failed",
+              "image_count": len(scope_images), "status": "failed", "attempt": attempt, "is_retry": attempt > 1,
               "max_output_tokens": predict_limit, "focused_reread": bool(instruction),
               "image_processing_seconds": None}
     _record_ollama_metrics(record, {})
@@ -325,13 +342,15 @@ def _ask_with_retry(images, page_number, page_count, scope, diagnostics=None, **
     try:
         return _ask_scope(images, page_number, page_count, scope, diagnostics=diagnostics, **kwargs)
     except VisionTruncatedError:
-        initial = int(os.environ.get("OLLAMA_NUM_PREDICT", "4096"))
+        initial = kwargs.get("max_output_tokens") or _scope_budget(scope)
         ceiling = min(8192, int(os.environ.get("OLLAMA_NUM_CTX", "16384")) // 2)
         expanded = min(initial * 2, ceiling)
         if expanded <= initial:
             raise
-        return _ask_scope(images, page_number, page_count, scope, diagnostics=diagnostics,
-                          max_output_tokens=expanded, **kwargs)
+        if diagnostics:
+            diagnostics[-1]["retried"] = True
+        kwargs = dict(kwargs, max_output_tokens=expanded, attempt=2)
+        return _ask_scope(images, page_number, page_count, scope, diagnostics=diagnostics, **kwargs)
 
 
 def ask_visual(images: list[str] | str, page_number: int, page_count: int,
@@ -722,4 +741,5 @@ def parse_invoice_visual(pdf_path, pages, filename, language, mode="auto", progr
     from label_value_pairing import apply_invoice_number_candidates
     result = _parse_invoice_visual(pdf_path, pages, filename, language, mode=mode, progress=progress)
     apply_invoice_number_candidates(result, pages)
+    result["vision_attempt_summary"] = vision_attempt_summary(result.get("vision_diagnostics", []))
     return attach_mapping_coverage(result, pages)

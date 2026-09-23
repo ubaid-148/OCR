@@ -62,3 +62,20 @@ python -m tools.build_colab_bundle
 To limit additional image rereads, set `VISION_RECOVERY=false` in the extraction
 process environment. Fast mode skips vision altogether. Failed rereads retain the
 initial extraction and a review reason instead of fabricating values.
+
+## Header generation budget and retry timing
+
+Header requests now start with 8192 output tokens. Item requests retain the 4096
+budget. `OLLAMA_HEADER_NUM_PREDICT` overrides only the header budget;
+`OLLAMA_NUM_PREDICT` retains its item-budget role. A truncated request is retried
+only if the bounded retry budget is larger than the first attempt.
+
+`vision_attempt_summary` in extraction details and the notebook log reports total
+request wall time, failed/retry counts, failed-attempt time, and retry-attempt
+time. `wasted_retry_seconds` counts failed attempts actually followed by a budget
+retry. These durations overlap the total; do not add them together. Focused
+rereads remain separate requests and are identifiable in individual diagnostics.
+Increasing the budget removes the initial 4096-budget header attempt by default;
+it does not prove every header will fit, or establish a measured speedup without
+fresh inference. The supplied raw OCR fixture contains no executable model response
+and cannot establish single-attempt completion or latency on a GPU.
