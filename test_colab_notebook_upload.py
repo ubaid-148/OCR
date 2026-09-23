@@ -1,5 +1,5 @@
 """Execute the upload-to-result cell with mocked Colab and OCR processes."""
-from contextlib import redirect_stdout
+from contextlib import redirect_stdout, nullcontext
 import io
 import json
 from pathlib import Path
@@ -32,6 +32,9 @@ class ColabUploadTests(unittest.TestCase):
         runtime.prepare_runtime = lambda project, require_gpu: (
             preparations.append((project, require_gpu)) or sys.executable
         )
+        ui = types.ModuleType('colab_upload_ui')
+        ui.show_upload_form = lambda process, **kwargs: process(files.upload(), kwargs['mode'], kwargs['language'], kwargs['diagnostics'], lambda *args: None, nullcontext())
+        ui.show_download = lambda path, label: files.download(str(path))
         calls = []
         invoice = {'invoice_number': 'INV-7', 'items': [],
                    'validation': {'passed': False, 'warnings': ['needs_review: missing items']}}
@@ -48,7 +51,7 @@ class ColabUploadTests(unittest.TestCase):
             return types.SimpleNamespace(returncode=0, stderr='', stdout='')
 
         output = io.StringIO()
-        modules = {'google': google, 'google.colab': colab, 'google.colab.files': files,'colab_vision':vision}
+        modules = {'google': google, 'google.colab': colab, 'google.colab.files': files,'colab_vision':vision, 'colab_upload_ui':ui}
         scope = {'PROJECT_DIR': root}
         if recover_runtime:
             modules['colab_runtime'] = runtime
