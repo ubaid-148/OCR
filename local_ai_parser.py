@@ -49,8 +49,14 @@ def _validate(data: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
         calculation_mode='per_unit_printed_columns' if per_unit else 'extended_line' if direct else None
         effective_amount=(qty*amount-line_discount if per_unit else amount)
         effective_vat=(qty*line_vat if per_unit and line_vat is not None else line_vat)
+        rate = _decimal(item.get("tax_rate"))
+        rate_valid = None
+        if rate is not None and amount is not None and line_vat is not None:
+            expected_line_tax = (amount * rate / 100).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            rate_valid = abs(expected_line_tax - line_vat) <= tolerance
+            valid = valid and rate_valid
         item_checks.append({"line_no": item.get("line_no", index + 1), "valid": valid,
-                            "calculation_mode": calculation_mode})
+                            "tax_rate_valid": rate_valid, "calculation_mode": calculation_mode})
         if amount is not None:
             amounts.append(effective_amount)
         line_taxes.append(effective_vat)
@@ -59,14 +65,26 @@ def _validate(data: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
     item_sum = sum(amounts, Decimal("0"))
     subtotal_valid = bool(items) and subtotal is not None and len(amounts) == len(items) and abs(item_sum - subtotal) <= tolerance
     vat_rate = _decimal(totals.get("vat_rate"))
-    vat_expected = ((subtotal - (discount or Decimal("0"))) * vat_rate / 100).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) if subtotal is not None and vat_rate is not None else None
+    other_charges = _decimal(totals.get("other_charges")) or Decimal("0")
+    taxable = _decimal(totals.get("taxable_amount"))
+    expected_taxable = subtotal - (discount or Decimal("0")) if subtotal is not None else None
+    taxable_valid = (abs(taxable - expected_taxable) <= tolerance
+                     if taxable is not None and expected_taxable is not None else None)
+    tax_base = taxable if taxable is not None else expected_taxable
+    vat_expected = (tax_base * vat_rate / 100).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) if tax_base is not None and vat_rate is not None else None
     vat_valid = vat_expected is not None and vat is not None and abs(vat_expected - vat) <= tolerance
-    net_expected = subtotal - (discount or Decimal("0")) + vat if subtotal is not None and vat is not None else None
+    if vat_rate is None and items and all(v is not None for v in line_taxes) and all(
+            check.get("tax_rate_valid") is True for check in item_checks):
+        # Mixed rates have no single document rate; validate the printed line
+        # taxes instead of assuming the default local VAT percentage.
+        vat_expected = sum(line_taxes, Decimal("0"))
+        vat_valid = vat is not None and abs(vat_expected - vat) <= tolerance
+    net_expected = tax_base + vat + other_charges if tax_base is not None and vat is not None else None
     net_valid = net_expected is not None and net is not None and abs(net_expected - net) <= tolerance
     validation = {
         "item_checks": item_checks, "items_sum": float(item_sum) if items else None,
         "items_calculation_valid": bool(items) and all(check["valid"] for check in item_checks),
-        "subtotal_valid": subtotal_valid,
+        "subtotal_valid": subtotal_valid, "taxable_amount_valid": taxable_valid,
         "vat_expected": float(vat_expected) if vat_expected is not None else None, "vat_valid": vat_valid,
         "net_expected": float(net_expected) if net_expected is not None else None, "net_amount_valid": net_valid,
     }
@@ -88,7 +106,7 @@ def _validate(data: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
             if item.get(key) in (None, ""):
                 missing.append(f"items[{index}].{key}")
     calculations_valid = all((validation["items_calculation_valid"], subtotal_valid, vat_valid, net_valid))
-    needs_review = bool(missing or not calculations_valid or tax_rounding_issue)
+    needs_review = bool(missing or not calculations_valid or tax_rounding_issue or taxable_valid is False)
     quality = {
         "overall_status": "checks_passed" if not needs_review else "needs_review",
         "needs_review": needs_review, "missing_fields": missing,
@@ -153,6 +171,9 @@ def _parse_invoice_hybrid(pages: list[dict[str, Any]], source_filename: str, lan
         if uncovered:
             quality.update(needs_review=True, overall_status="needs_review")
             quality["unresolved_pages"] = uncovered
+            quality.setdefault("review_reasons", []).append(
+                "No item table was established on pages: " + ", ".join(map(str, uncovered)) +
+                ". These may be attachments or unparsed continuation pages; check the source.")
         candidate = {"data": layout, "quality": quality}
         if _result_score(candidate) >= _result_score(fallback):
             fallback = candidate
@@ -210,4 +231,5 @@ def parse_invoice_hybrid(pages, source_filename, language, mode='auto'):
            for page in pages for a in page.get('targeted_ocr',{}).get('accepted',[])):
         quality.update(needs_review=True,overall_status='needs_review')
         quality.setdefault('review_reasons',[]).append('Check names and item descriptions recovered by targeted OCR against the PDF.')
-    return result
+    from mapping_coverage import attach_mapping_coverage
+    return attach_mapping_coverage(result, pages)

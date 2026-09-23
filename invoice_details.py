@@ -57,4 +57,20 @@ def add_printed_details(data, pages):
                 ('beneficiary',r'^Beneficiary\s*:'),('bank_name',r'^Bank\s*:?(?=\s|$)'),
                 ('account_no',r'^A/c\s*No\.?\s*:?'),('branch',r'^Branch\s*:?'),('iban',r'^IBAN\s*:?')]}
             if any(bank.values()):data['bank_details']=bank
+        # Preserve explicit unfamiliar labels without guessing their canonical
+        # meaning. Invoices vary; a printed purchase-order or delivery reference
+        # should remain visible even when the schema has no dedicated key.
+        extras = data.setdefault('other_fields', [])
+        existing = {(v.get('label'), v.get('value'), v.get('page')) for v in extras}
+        for word in words:
+            match = re.fullmatch(r'\s*([^:：\n]{2,80})\s*[:：]\s*(\S[^\n]{0,499})\s*', word['text'])
+            if not match or not re.search(r'[A-Za-z\u0600-\u06ff]', match[1]):
+                continue
+            label, value = match[1].strip(), match[2].strip()
+            if label.lower() in {'http', 'https'}:
+                continue
+            marker = (label, value, page.get('page', 1))
+            if marker not in existing:
+                extras.append(dict(label=label, value=value, page=marker[2]))
+                existing.add(marker)
     return data

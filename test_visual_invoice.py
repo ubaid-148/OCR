@@ -60,6 +60,28 @@ class VisualInvoiceTests(unittest.TestCase):
         self.assertEqual(response["data"]["items"][0]["amount"], 14.79)
         self.assertEqual(response["data"]["other_fields"][0]["page"], 2)
 
+    def test_failed_page_does_not_stop_later_page_vision(self):
+        first = fallback()
+        first['data']['items'] = []
+        later = visual_raw()
+        later['invoice']['invoice_number'] = 'LATER-123'
+        with patch.dict(os.environ, {'USE_LOCAL_AI':'true'}), \
+             patch('visual_invoice.parse_invoice_hybrid', return_value=first), \
+             patch('visual_invoice.render_pages', return_value=[(1,2,['A']),(2,2,['B'])]), \
+             patch('visual_invoice.ask_visual', side_effect=[RuntimeError('page timeout'),later]) as ask:
+            result=parse_invoice_visual('original.pdf',[{'page':1,'words':[]},{'page':2,'words':[]}], 'test.pdf','eng')
+        self.assertEqual(ask.call_count,2)
+        self.assertEqual(result['data']['invoice']['invoice_number'],'LATER-123')
+        self.assertEqual(len(result['data']['items']),3)
+        self.assertEqual(result['vision_page_errors'][0]['page'],1)
+        self.assertTrue(result['quality']['needs_review'])
+        self.assertTrue(any('page 1' in note for note in result['quality']['review_reasons']))
+
+    def test_auto_with_disabled_vision_is_explicitly_flagged(self):
+        with patch.dict(os.environ, {'USE_LOCAL_AI':'false'}):
+            result=parse_invoice_visual('original.pdf',[], 'test.pdf','eng',mode='auto')
+        self.assertTrue(any('vision is disabled' in note for note in result['quality']['review_reasons']))
+
     def test_request_sends_original_image_not_ocr_boxes(self):
         responses = [{"done": True, "message": {"content": "{}"}},
                      {"done": True, "message": {"content": '{"items":[]}'}}]
@@ -118,12 +140,14 @@ class VisualInvoiceTests(unittest.TestCase):
                          "eval_duration": 8_000_000_000, "message": {"content": "{}"}}):
             with self.subTest(failure=failure):
                 responses = [{"message": {"content": '{"invoice":{"invoice_number":"INV-1"}}'}}, failure]
+                if isinstance(failure, dict):
+                    responses.append(failure)
                 with patch("visual_invoice.parse_invoice_hybrid", return_value=fallback()), \
                      patch("visual_invoice.render_pages", return_value=[(1, 1, ["IMAGE"])]), \
                      patch("visual_invoice.request_json", side_effect=responses):
                     result = parse_invoice_visual("unused.pdf", [], "x.pdf", "eng")
                 self.assertEqual(result["data"]["invoice"]["invoice_number"], "INV-1")
-                header, items = result["vision_diagnostics"]
+                header, items = result["vision_diagnostics"][:2]
                 self.assertEqual(header["status"], "completed")
                 self.assertEqual(items["status"], "failed")
                 self.assertIn("visual_ai", result["stage_timings"])

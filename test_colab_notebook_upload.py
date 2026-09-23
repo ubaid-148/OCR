@@ -16,9 +16,9 @@ class ColabUploadTests(unittest.TestCase):
         return ''.join(next(c for c in notebook['cells']
                             if 'Upload PDF and get invoice result' in ''.join(c['source']))['source'])
 
-    def run_cell(self, root, fail_ocr=False, recover_runtime=False):
+    def run_cell(self, root, fail_ocr=False, recover_runtime=False, uploads=None):
         files = types.ModuleType('google.colab.files')
-        files.upload = lambda: {'invoice.pdf': b'%PDF-1.7\nfixture'}
+        files.upload = lambda: uploads if uploads is not None else {'invoice.pdf': b'%PDF-1.7\nfixture'}
         downloads = []
         files.download = downloads.append
         colab = types.ModuleType('google.colab')
@@ -79,13 +79,25 @@ class ColabUploadTests(unittest.TestCase):
             self.assertEqual(raw['pages'],[])
             self.assertEqual(raw['extraction_details']['quality']['parser'],'visual_ai')
             self.assertIn('--pdf',calls[1])
-            self.assertEqual(calls[1][calls[1].index('--mode')+1],'fast')
+            self.assertEqual(calls[1][calls[1].index('--mode')+1],'auto')
 
     def test_ocr_failure_does_not_parse_or_download_a_result(self):
         with tempfile.TemporaryDirectory() as directory:
             calls, downloads, _, _, _ = self.run_cell(Path(directory), fail_ocr=True)
             self.assertEqual(len(calls), 1)
             self.assertEqual(downloads, [])
+
+    def test_multiple_pdfs_continue_after_invalid_file_and_avoid_name_collisions(self):
+        with tempfile.TemporaryDirectory() as directory:
+            uploads = {'a?.pdf': b'%PDF-1.7\nfixture', 'bad.pdf': b'invalid',
+                       'a!.PDF': b'%PDF-1.7\nfixture'}
+            calls, downloads, output, _, _ = self.run_cell(Path(directory), uploads=uploads)
+            self.assertEqual(len(calls), 4)
+            self.assertEqual(len(downloads), 2)
+            self.assertNotEqual(downloads[0], downloads[1])
+            self.assertTrue(all(Path(path).is_file() for path in downloads))
+            self.assertIn('Processed 2/3 PDFs', output)
+            self.assertIn('bad.pdf', output)
 
     def test_upload_cell_recovers_when_notebook_variables_were_cleared(self):
         with tempfile.TemporaryDirectory() as directory:

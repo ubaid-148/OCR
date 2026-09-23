@@ -76,7 +76,7 @@ def to_canonical(extracted: dict[str, Any]) -> dict[str, Any]:
         ("seller", _object(seller_source, SELLER_KEYS, {"tax_number": ("vat_number",), "commercial_registration": ("cr_number", "commercial_reg"), "building_no": ("building",)})),
         ("customer", _object(customer_source, CUSTOMER_KEYS, {"tax_number": ("vat_number",), "commercial_registration": ("cr_number", "commercial_reg"), "building_no": ("building",)})),
         ("items", []),
-        ("totals", _object(totals_source, TOTAL_KEYS, {"total_vat": ("vat_amount",), "total_amount_including_vat": ("net_amount",), "total_excluding_vat": ("subtotal",)})),
+        ("totals", _object(totals_source, TOTAL_KEYS, {"total_vat": ("vat_amount",), "total_amount_including_vat": ("net_amount",), "total_excluding_vat": ("subtotal",), "total_taxable_amount_excluding_vat": ("taxable_amount",), "total_vat_rate_percent": ("vat_rate",), "amount_in_words_ar": ("amount_in_words",)})),
         ("vat_summary", _object(vat_source, ("tax_code", "before_tax", "tax_amount", "including_tax"), {"tax_amount": ("vat_amount",)})),
         ("currency", _value(source, "currency")),
         ("page_info", OrderedDict([("page", source.get("page_info", {}).get("page", 1) if isinstance(source.get("page_info"), dict) else 1), ("total_pages", source.get("page_info", {}).get("total_pages", len(extracted.get("pages", [])) or 1) if isinstance(source.get("page_info"), dict) else len(extracted.get("pages", [])) or 1)])),

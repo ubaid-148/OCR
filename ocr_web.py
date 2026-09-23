@@ -80,7 +80,7 @@ button:hover {{ background:#0f4b3d; }}
 <p class="hint"><strong>Parser:</strong> Image-first local vision AI with spatial OCR fallback.</p>
 {safe_message}
 <form method="post" enctype="multipart/form-data">
-<label>PDF file<input type="file" name="pdf" accept="application/pdf,.pdf" required></label>
+<label>PDF files<input type="file" name="pdf" accept="application/pdf,.pdf" multiple required></label>
 <details class="advanced"><summary>Advanced options</summary>
 <label>Languages<select name="languages"><option value="eng+ara">English + Arabic</option><option value="eng">English only</option><option value="ara">Arabic only</option><option value="eng+urd">English + Urdu</option></select></label>
 <label>Processing<select name="mode"><option value="auto">Accuracy (original PDF image + OCR cross-check)</option><option value="fast">Fast (spatial OCR + validation only)</option></select></label>
@@ -159,6 +159,11 @@ class Handler(BaseHTTPRequestHandler):
         message = BytesParser(policy=policy.default).parsebytes(
             f"Content-Type: {content_type}\r\nMIME-Version: 1.0\r\n\r\n".encode() + body
         )
+        pdf_parts = [part for part in message.iter_parts()
+                     if part.get_param('name', header='content-disposition') == 'pdf']
+        if len(pdf_parts) > 1:
+            self.send_failure('Send one PDF per request; the web form queues multiple PDFs automatically.', 400)
+            return
         fields = multipart_form_fields(message)
         pdf_part = fields.get("pdf")
         language_part = fields.get("languages")

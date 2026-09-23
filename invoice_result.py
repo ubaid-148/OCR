@@ -39,7 +39,7 @@ def extract_result(payload, filename, language="eng+ara", *, pdf_path=None, mode
     if issues:
         notes.append("Unverified fields: " + ", ".join(dict.fromkeys(issue.get("field", "text") for issue in issues)))
     checks = data.get("validation", {})
-    if any(checks.get(key) is False for key in ("items_calculation_valid", "subtotal_valid", "vat_valid", "net_amount_valid")):
+    if any(checks.get(key) is False for key in ("items_calculation_valid", "subtotal_valid", "taxable_amount_valid", "vat_valid", "net_amount_valid")):
         notes.append("Item arithmetic or totals could not be fully verified.")
     if quality.get("targeted_ocr_errors"):
         notes.append("Some focused OCR retries failed; check missing values.")
@@ -82,6 +82,7 @@ def extract_result(payload, filename, language="eng+ara", *, pdf_path=None, mode
         "other_fields": data.get("other_fields", []),
         "bank_details": data.get("bank_details"),
         "review_notes": list(dict.fromkeys(notes)),
+        "unmapped_text": parsed.get("unmapped_text", []),
     }
 
 

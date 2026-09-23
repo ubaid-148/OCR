@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Any
 
 from bbox_grouping import box_geometry, group_rows
+from invoice_formatter import contains
 
 # Proposed calibration defaults for the approved future ranking design.
 # These are NOT empirical results; validate/challenge them against the frozen
@@ -43,8 +44,7 @@ def _norm(text: str) -> str:
 
 
 def _contains(text: str, label: str) -> bool:
-    actual, wanted = _norm(text), _norm(label)
-    return wanted in actual or wanted.replace(" ", "") in actual.replace(" ", "")
+    return contains(_norm(text), (_norm(label),))
 
 
 def _distance(label: dict[str, Any], value: dict[str, Any]) -> float:
@@ -60,11 +60,16 @@ def pair_labels(boxes: list[dict[str, Any]], labels: dict[str, tuple[str, ...]] 
     rows = group_rows(boxes)
     row_by_id = {id(box): row for row in rows for box in row}
     result: dict[str, dict[str, Any]] = {}
+    label_ids = {id(box) for box in boxes if any(
+        _contains(str(box.get("text", "")), name)
+        for names in aliases.values() for name in names)}
     for field, names in aliases.items():
         for label in (box for box in boxes if any(_contains(str(box.get("text", "")), name) for name in names)):
             candidates = []
             for value in boxes:
-                if value is label or any(_contains(str(value.get("text", "")), name) for name in names):
+                if value.get("page", 1) != label.get("page", 1):
+                    continue
+                if id(value) in label_ids:
                     continue
                 same_row = value in row_by_id.get(id(label), [])
                 distance = _distance(label, value)

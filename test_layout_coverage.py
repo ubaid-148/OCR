@@ -18,6 +18,8 @@ class LayoutCoverageTests(unittest.TestCase):
         self.assertEqual(len(result['items']),1)
         row=result['items'][0]
         self.assertIsNone(row['item_code'])
+        self.assertEqual(row['unit'], 'pcs')
+        self.assertEqual(row['tax_rate'], 15)
         self.assertIn('BLOWER ASSAMBLE',row['description'])
         self.assertIn('HZ 50/60',row['description'])
         self.assertEqual((row['quantity'],row['unit_price'],row['amount'],row['vat_amount'],row['gross_amount']),
@@ -28,6 +30,9 @@ class LayoutCoverageTests(unittest.TestCase):
         self.assertEqual(len(result['items']),1)
         row=result['items'][0]
         self.assertEqual(row['item_code'],'1103')
+        self.assertEqual(row['tax_rate'], 15)
+        self.assertEqual(result['totals']['other_charges'], 0)
+        self.assertEqual(result['totals']['taxable_amount'], 40)
         self.assertEqual((row['quantity'],row['unit_price'],row['amount'],row['vat_amount'],row['gross_amount']),
                          (1,40,40,6,46))
 

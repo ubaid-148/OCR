@@ -117,8 +117,8 @@ def audit_ai(data, pages):
     matches = [(p,w) for p,w in words if value and any(date_key(t)==date_key(value)
                for t in re.findall(r"\b(?:\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[-/]\d{1,2}[-/]\d{4})\b", normalized(w.get("text", ""))))]
     check(data["invoice"], "date_of_supply", "invoice.date_of_supply", matches)
-    containers = [("totals", data["totals"], ("subtotal", "discount", "vat_rate", "vat_amount", "net_amount"))]
-    containers += [(f"items[{i}]", item, ("quantity", "unit_price", "amount", "vat_amount", "discount", "gross_amount")) for i,item in enumerate(data.get("items", []))]
+    containers = [("totals", data["totals"], ("subtotal", "discount", "other_charges", "taxable_amount", "vat_rate", "vat_amount", "net_amount"))]
+    containers += [(f"items[{i}]", item, ("quantity", "unit_price", "amount", "vat_amount", "tax_rate", "discount", "gross_amount")) for i,item in enumerate(data.get("items", []))]
     for prefix, container, keys in containers:
         for key in keys:
             value = container.get(key)

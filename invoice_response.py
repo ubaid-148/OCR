@@ -10,11 +10,16 @@ from typing import Any
 from visual_invoice import ITEM_NUMBERS, ITEM_TEXT, TEXT_FIELDS, TOTAL_NUMBERS, VAT_NUMBERS
 
 
-SCHEMA_VERSION = "1.1"
+SCHEMA_VERSION = "1.2"
+PARTY_FIELDS = {
+    "supplier": (*TEXT_FIELDS["supplier"], "commercial_registration", "address", "business_type"),
+    "customer": (*TEXT_FIELDS["customer"], "commercial_registration"),
+}
+PUBLIC_TOTAL_FIELDS = (*TOTAL_NUMBERS, "currency", "amount_in_words")
 TOP_LEVEL_KEYS = (
     "schema_version", "status", "pipeline_version", "parser", "local_ai_status",
     "local_ai_error", "data", "field_reviews", "review_notes", "ocr_device", "page_orientations",
-    "timings_seconds", "error",
+    "timings_seconds", "unmapped_text", "error",
 )
 
 
@@ -49,13 +54,14 @@ def _empty_data() -> dict[str, Any]:
     return {
         "source_filename": None, "document_type": None, "document_type_ar": None,
         "amount_in_words_ar": None, "handwritten_notes": None,
-        "supplier": values(TEXT_FIELDS["supplier"]),
+        "supplier": values(PARTY_FIELDS["supplier"]),
         "invoice": values(TEXT_FIELDS["invoice"]),
-        "customer": values(TEXT_FIELDS["customer"]),
+        "customer": values(PARTY_FIELDS["customer"]),
         "items": [],
         "vat_summary": values((*VAT_NUMBERS, "tax_code")),
-        "totals": values((*TOTAL_NUMBERS, "currency")),
+        "totals": values(PUBLIC_TOTAL_FIELDS),
         "other_fields": None,
+        "bank_details": None,
         "validation": {},
     }
 
@@ -77,6 +83,7 @@ def _validation_reviews(data: dict[str, Any]) -> list[dict[str, Any]]:
     failed_checks = {
         "items_calculation_valid": "items",
         "subtotal_valid": "totals.subtotal",
+        "taxable_amount_valid": "totals.taxable_amount",
         "vat_valid": "totals.vat_amount",
         "net_amount_valid": "totals.net_amount",
         "line_vat_sum_matches": "totals.vat_amount",
@@ -147,9 +154,9 @@ def validate_response_schema(response: Any) -> dict[str, Any]:
                for item in response["data"]["items"]):
         raise ValueError("Invoice response items must be objects")
     expected_sections = {
-        "supplier": TEXT_FIELDS["supplier"], "invoice": TEXT_FIELDS["invoice"],
-        "customer": TEXT_FIELDS["customer"], "vat_summary": (*VAT_NUMBERS, "tax_code"),
-        "totals": (*TOTAL_NUMBERS, "currency"),
+        "supplier": PARTY_FIELDS["supplier"], "invoice": TEXT_FIELDS["invoice"],
+        "customer": PARTY_FIELDS["customer"], "vat_summary": (*VAT_NUMBERS, "tax_code"),
+        "totals": PUBLIC_TOTAL_FIELDS,
     }
     for section, keys in expected_sections.items():
         if tuple(response["data"][section]) != tuple(keys):
@@ -193,6 +200,10 @@ def validate_response_schema(response: Any) -> dict[str, Any]:
         raise ValueError("Invoice response review_notes are invalid")
     if not isinstance(response["page_orientations"], list) or not isinstance(response["timings_seconds"], dict):
         raise ValueError("Invoice response diagnostics are invalid")
+    if not isinstance(response["unmapped_text"], list) or not all(
+            isinstance(entry, dict) and isinstance(entry.get("page"), int) and
+            isinstance(entry.get("text"), str) for entry in response["unmapped_text"]):
+        raise ValueError("Invoice response unmapped_text must contain page/text entries")
     error = response["error"]
     if response["status"] == "error":
         if not isinstance(error, dict) or not isinstance(error.get("message"), str):
@@ -216,13 +227,17 @@ def clean_invoice_response(payload: Any) -> dict[str, Any]:
     result.update(select(data, ("source_filename", "document_type", "document_type_ar",
                                 "amount_in_words_ar")))
     result["handwritten_notes"] = _json_safe(data.get("handwritten_notes"))
-    result["supplier"] = select(data.get("supplier"), TEXT_FIELDS["supplier"])
+    result["supplier"] = select(data.get("supplier"), PARTY_FIELDS["supplier"])
     result["invoice"] = select(data.get("invoice"), TEXT_FIELDS["invoice"])
-    result["customer"] = select(data.get("customer"), TEXT_FIELDS["customer"])
+    result["customer"] = select(data.get("customer"), PARTY_FIELDS["customer"])
+    for party in ("supplier", "customer"):
+        result[party]["commercial_registration"] = (result[party].get("commercial_registration")
+                                                       or result[party].get("cr_number"))
     result["items"] = [select(item, ("line_no", *ITEM_TEXT, *ITEM_NUMBERS))
                        for item in data.get("items", []) if isinstance(item, dict)]
     result["vat_summary"] = select(data.get("vat_summary"), (*VAT_NUMBERS, "tax_code"))
-    result["totals"] = select(data.get("totals"), (*TOTAL_NUMBERS, "currency"))
+    result["totals"] = select(data.get("totals"), PUBLIC_TOTAL_FIELDS)
+    result["bank_details"] = _json_safe(data.get("bank_details"))
     result["other_fields"] = _json_safe(data.get("other_fields"))
     result["validation"] = _json_safe(data.get("validation") if isinstance(data.get("validation"), dict) else {})
 
@@ -247,6 +262,7 @@ def clean_invoice_response(payload: Any) -> dict[str, Any]:
         "ocr_device": str(payload.get("ocr_device", "unknown")),
         "page_orientations": _json_safe(payload.get("page_orientations") or []),
         "timings_seconds": _json_safe(payload.get("timings_seconds") or {}),
+        "unmapped_text": _json_safe(payload.get("unmapped_text", [])),
         "error": None,
     }
     return validate_response_schema(response)
@@ -263,7 +279,7 @@ def error_invoice_response(code: Any, message: Any, partial_payload: Any = None)
             "pipeline_version": "unknown", "parser": "failed",
             "local_ai_status": "not_reported", "local_ai_error": None, "data": _empty_data(),
             "field_reviews": [], "review_notes": [], "ocr_device": "unknown",
-            "page_orientations": [], "timings_seconds": {}, "error": None,
+            "page_orientations": [], "timings_seconds": {}, "unmapped_text": [], "error": None,
         }
     response["status"] = "error"
     response["error"] = {"code": _json_safe(code), "message": str(message)[:2000]}

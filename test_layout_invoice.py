@@ -40,6 +40,62 @@ class LayoutInvoiceTests(unittest.TestCase):
             self.assertEqual(result['field_evidence']['totals.'+key]['bbox'][1],580)
         self.assertEqual(len(result['items']),1)
 
+    def test_trailing_attachment_does_not_erase_invoice_totals(self):
+        pages = [{'page': 1, 'words': self.summary_page()[:8]},
+                 {'page': 2, 'words': [box('Subtotal', 100, 100), box('20', 400, 100),
+                                      box('Total VAT', 100, 150), box('3', 400, 150),
+                                      box('Grand Total', 100, 200), box('23', 400, 200)]},
+                 {'page': 3, 'words': [box('Delivery terms', 100, 100), box('999', 400, 200)]}]
+        result = parse_layout(pages, 'arbitrary.pdf', 'eng')
+        self.assertEqual(result['totals']['net_amount'], 23)
+        self.assertEqual(result['field_evidence']['totals.net_amount']['page'], 2)
+        self.assertEqual(len(result['items']), 1)
+
+    def test_tax_inclusive_total_does_not_also_become_subtotal(self):
+        words = self.summary_page()[:8] + [box('Total Amount Including VAT', 100, 650),
+                                          box('23.00', 500, 650)]
+        result = parse_layout([{'words': words}], 'arbitrary.pdf', 'eng')
+        self.assertEqual(result['totals']['net_amount'], 23)
+        self.assertIsNone(result['totals']['subtotal'])
+
+    def test_before_tax_label_does_not_also_become_vat_amount(self):
+        words = self.summary_page()[:8] + [box('المجموع قبل الضريبة', 100, 650),
+                                          box('20.00', 500, 650)]
+        result = parse_layout([{'words': words}], 'arbitrary.pdf', 'eng+ara')
+        self.assertEqual(result['totals']['subtotal'], 20)
+        self.assertIsNone(result['totals']['vat_amount'])
+
+    def test_joined_arabic_tax_label_maps_its_own_amount(self):
+        words = self.summary_page()[:8] + [
+            box('المجموع قبل الضريبة', 400, 650), box('62.61', 100, 650),
+            box('القيمةالضريبة', 400, 700), box('9.39', 100, 700),
+            box('Total With VAT', 400, 750), box('72.00', 100, 750)]
+        result = parse_layout([{'words': words}], 'unseen.pdf', 'eng+ara')
+        self.assertEqual(result['totals']['subtotal'], 62.61)
+        self.assertEqual(result['totals']['vat_amount'], 9.39)
+        self.assertEqual(result['totals']['net_amount'], 72)
+
+    def test_inline_totals_preserve_printed_evidence(self):
+        words = self.summary_page()[:8] + [
+            box('Subtotal: 20.00', 100, 650),
+            box('VAT Amount: 3.00', 100, 700),
+            box('Grand Total: 23.00 SAR', 100, 750)]
+        result = parse_layout([{'words': words}], 'arbitrary.pdf', 'eng')
+        for key, value in [('subtotal', 20), ('vat_amount', 3), ('net_amount', 23)]:
+            self.assertEqual(result['totals'][key], value)
+            self.assertIn(':', result['field_evidence']['totals.' + key]['text'])
+
+    def test_inline_total_keeps_thousands_separator(self):
+        words = self.summary_page()[:8] + [box('Grand Total: 1,234.56', 100, 750)]
+        result = parse_layout([{'words': words}], 'arbitrary.pdf', 'eng')
+        self.assertEqual(result['totals']['net_amount'], 1234.56)
+
+    def test_inline_percentage_and_multiple_amounts_are_not_totals(self):
+        for text in ('VAT Amount: 15%', 'VAT Amount: 3.00 23.00', 'VAT Amount Code: 3001234'):
+            words = self.summary_page()[:8] + [box(text, 100, 700)]
+            result = parse_layout([{'words': words}], 'arbitrary.pdf', 'eng')
+            self.assertIsNone(result['totals']['vat_amount'])
+
     def test_summary_does_not_replace_explicit_printed_total(self):
         words=self.summary_page()+[box('Grand Total',100,680),box('24.00',400,680)]
         result=parse_layout([{'words':words}],'arbitrary.pdf','eng')

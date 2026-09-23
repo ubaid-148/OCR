@@ -1,3 +1,7 @@
+> Historical OCR-only benchmark below. Current Colab/batch defaults use `auto`
+> (local vision plus OCR) for unfamiliar layouts. Use `--mode fast` to reproduce
+> the OCR-only batch configuration described here.
+
 # Free local OCR update
 
 This update does not claim complete extraction accuracy. The default Colab flow

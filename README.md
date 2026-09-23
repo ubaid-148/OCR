@@ -1,3 +1,6 @@
+> **Colab testing:** open the [GitHub notebook in Colab](https://colab.research.google.com/github/ubaid-148/OCR/blob/main/colab_setup.ipynb)
+> in a fresh runtime and run from cell 1. See [COLAB_TESTING.md](COLAB_TESTING.md) for testing instructions.
+
 # Local Invoice OCR
 
 Colab-first application for multi-layout invoice PDFs. In Accuracy mode, a local
@@ -39,15 +42,15 @@ Optional environment variables:
 python ocr_web.py
 ```
 
-Open <http://127.0.0.1:8765> and upload a PDF invoice.
+Open <http://127.0.0.1:8765> and select one or more PDF invoices. The browser processes them sequentially and shows a separate result for each file.
 
 ## Google Colab
 
 [Open the invoice notebook](https://colab.research.google.com/github/ubaid-148/OCR/blob/main/colab_setup.ipynb), choose **Runtime → Change runtime type → T4 GPU**, then **Runtime → Run all**.
-Upload one PDF when prompted. Its final invoice JSON is displayed and downloaded automatically.
+Upload one or more PDFs when prompted. Its final invoice JSON is displayed and downloaded automatically.
 
 For the free OCR flow, use `colab_setup.ipynb`, not the separate training notebook.
-The notebook has three steps: load project, prepare OCR, and upload/get result.
+The notebook has three steps: load project, prepare OCR, and upload/get results. Multiple uploads are processed separately; a failed PDF does not discard successful results.
 Step 1 prints the Git commit being tested. Step 2 checks the Paddle device and
 runs a committed invoice sample through the parser before enabling upload.
 Step 2 reads dependencies from `/content/OCR/requirements.txt`, so it works
@@ -80,9 +83,9 @@ the OCR result flow remains the same but takes longer.
 Focused retries now reread faint customer names and item descriptions from both
 enhanced and original crops. A numeric item row without a readable description
 triggers a table reread; a failed crop is reported while other retries continue.
-Default `EXTRACTION_MODE="fast"` runs PaddleOCR with focused retries and the
-spatial parser, without downloading or calling Qwen. Choose `auto` explicitly
-to enable experimental full-page vision review. The existing spatial parser
+Default `EXTRACTION_MODE="auto"` runs PaddleOCR plus original-page vision reading
+for unfamiliar invoice layouts. Setup prepares the local vision model automatically.
+Choose `fast` explicitly to use only OCR and spatial rules without vision. The existing spatial parser
 provides independent evidence and a fallback. Image readings are checked against
 OCR, row order/count and arithmetic; disagreement stays flagged for review.
 No per-supplier template selection is required. This does not guarantee correct
@@ -313,3 +316,60 @@ service rather than starting a duplicate and overwriting its log. HTTP failures
 during invoice parsing include Ollama's response in `quality.local_ai_error`.
 This exposes model/driver/memory failures; it does not itself repair them.
 Run HTTP error regressions with `python -m unittest test_ollama_http`.
+
+## General invoice layouts and batch processing
+
+Colab and `python -m tools.batch_local_ocr` default to `auto`: the original page
+images are read by the local vision model, with spatial OCR as independent
+evidence and fallback. This does not require a supplier template or known PDF
+filename. The web UI already defaults to Accuracy. It handles invoice PDFs;
+arbitrary non-invoice documents do not have the same extraction schema.
+
+For the batch CLI, prepare Ollama and a vision model first (Colab setup does this
+automatically), then run:
+
+```sh
+python -m tools.batch_local_ocr --pdf-dir public_invoice_pdfs --output benchmark_outputs/live-local --mode auto
+```
+
+Each `.details.json` records the parser, vision failures/rejections and review
+reasons. Mode, language and vision configuration participate in cache invalidation,
+so switching from fast to auto reruns extraction. `--mode fast` remains available
+for OCR-only runs. Vision adds model download/setup and per-page inference time;
+these defaults have integration-test coverage, not a measured live accuracy rate.
+
+## Mapping completion update (24 September 2026)
+
+The public web contract is now **schema 1.2**. It adds `unmapped_text` (page/text
+entries) and preserves bank details, supplier address/business type/commercial
+registration and amount-in-words fields that the compact result already supported.
+Clients enforcing schema 1.1 must update. The compact Colab result also contains
+`unmapped_text`. These entries include labels, logos and other unused OCR text as
+well as potentially missed values; they are not verified invoice fields. Full
+`mapping_coverage` diagnostics associate selected source boxes with field paths.
+
+Wrapped item units and percentages, explicit taxable totals and other charges
+are retained. Partial tables can retain rows when a price/amount header is absent;
+unreadable amounts remain null. Merged grid cells cannot move text into a nearby
+column, and footer totals are excluded from partial item tables. Validation covers
+printed line tax rates, mixed rates and non-zero other charges.
+
+A failed vision page now keeps its OCR fallback while later pages continue.
+Transient vision failures are retried when a batch is restarted; successful cached
+results remain reusable. Unknown inline `label: value` text is retained in
+`other_fields` without inventing its canonical meaning.
+
+Verify cached mappings (does not run recognition):
+
+```sh
+python -m tools.verify_cached_extraction ../pairing-baseline/raw --output benchmark_outputs/completion --source-checks benchmark_outputs/verification/source-checks.json
+```
+
+Restart the web server or rerun the updated Colab notebook after updating code.
+See `COMPLETION_REPORT.md` for checked results and remaining runtime limitations.
+
+Automatic image recovery now rereads unresolved page fields/rows once using enlarged
+original-page regions. Truncated vision requests receive one larger token-budget
+attempt (up to 8192, within the configured context); repeated truncation remains a
+review failure. Source conflicts and ambiguous row joins are preserved for review.
+These paths have mocked regression coverage; fresh GPU accuracy is not measured.
