@@ -24,8 +24,8 @@ def date_key(text):
     return text
 
 
-def audit_ai(data, pages):
-    """Retain values but flag unsupported/weak evidence for manual review.
+def audit_ai(data, pages, *, enforce_items=False):
+    """Audit source support; optionally clear item values without cell evidence.
 
     Occurrence is necessary but not sufficient: role/column correctness remains
     the parser's responsibility and arithmetic checks still run afterwards.
@@ -117,6 +117,8 @@ def audit_ai(data, pages):
     matches = [(p,w) for p,w in words if value and any(date_key(t)==date_key(value)
                for t in re.findall(r"\b(?:\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[-/]\d{1,2}[-/]\d{4})\b", normalized(w.get("text", ""))))]
     check(data["invoice"], "date_of_supply", "invoice.date_of_supply", matches)
+    from item_scope import scoped_item_evidence
+    scoped = scoped_item_evidence(data, pages)
     containers = [("totals", data["totals"], ("subtotal", "discount", "other_charges", "taxable_amount", "vat_rate", "vat_amount", "net_amount"))]
     containers += [(f"items[{i}]", item, ("quantity", "unit_price", "amount", "vat_amount", "tax_rate", "discount", "gross_amount")) for i,item in enumerate(data.get("items", []))]
     for prefix, container, keys in containers:
@@ -128,6 +130,15 @@ def audit_ai(data, pages):
             # booleans and non-numeric strings here instead of coercing them.
             matches = numeric_index.get(Decimal(str(value)), []) if isinstance(value, (int,float)) and not isinstance(value,bool) else []
             path = f"{prefix}.{key}"
+            if prefix.startswith("items["):
+                proof = scoped.get(path)
+                if proof:
+                    evidence[path] = proof
+                else:
+                    issues.append({"field": path, "reason": "No matching OCR evidence in a uniquely identified item row and column", "needs_review": True})
+                    if enforce_items:
+                        container[key] = None
+                continue
             if check(container, key, path, matches) and matches:
                 # A matching number anywhere on the page is not proof that it
                 # belongs to this row/column. Layout-selected evidence bypasses

@@ -88,3 +88,33 @@ spelling, amount-in-words and runtime performance are not resolved by these chan
 No source value is hard-coded. Fresh GPU inference remains necessary to evaluate
 recognition and prompt changes. The previous live run took 657.59 seconds in vision,
 including repeated truncated header generation; no speed improvement is claimed.
+
+## Systemic row/cell evidence and identifier candidate fixes
+
+Item numeric auditing no longer uses document-wide number occurrences. Shared
+`item_scope.py` resolves a unique positioned table row by code or description,
+then admits only that row's selected field evidence. Table cells use row midpoint
+boundaries and nearest-column partitions; footer Discount labels terminate the
+item region. The visual path clears unsupported numeric item fields to null and
+revalidates afterwards; original vision values remain in candidate diagnostics.
+Coverage discards stale item associations before rebuilding scoped evidence.
+Repeated/ambiguous item anchors conservatively remain unresolved, rather than
+borrowing evidence from another row. This can reduce populated fields where OCR
+cannot establish table geometry; it is intentional under the strict evidence rule.
+
+Invoice identifiers are ranked by same-page label alignment and normalized
+geometric distance, with confidence only breaking distance ties. English and
+Arabic value directions are respected. Candidate value, page, boxes, label,
+distance and confidence remain in quality diagnostics; alternate values appear
+in review notes. This rule applies to spatial and visual results.
+
+The supplied live OCR is committed as `tests/fixtures/9480_live_ocr.json`.
+Importantly, its Arabic invoice label is geometrically closer to 692 than the
+English label is to 9480 (normalized distances approximately 1.56 and 3.01).
+Therefore the generic rule selects 692 and flags 9480 as an alternate. The test
+for a genuinely nearer 9480 verifies that it wins over a higher-confidence 692;
+no identifier value or filename is hardcoded in production logic.
+
+Validation: 276 Python regression tests pass, browser upload queue checks pass.
+Cached replay covers 111 documents with zero parser exceptions and 111 valid
+schemas; selected source checks remain 33/35. This is not fresh GPU inference.

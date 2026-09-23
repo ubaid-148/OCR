@@ -632,10 +632,10 @@ def _parse_invoice_visual(pdf_path: str | Path, pages: list[dict[str, Any]],
         conflicts.extend(f"Vision failed on page {e['page']}; used its OCR fallback: {e['error']}" for e in page_errors)
         raw_visual = deepcopy(data)
         reconciliation_notes = reconcile_with_spatial(data, fallback["data"])
+        # Preserve the original candidate in diagnostics; public item numerics
+        # require evidence inside their own positioned row and column.
+        issues, evidence = audit_ai(data, pages, enforce_items=True)
         validation, quality = _validate(data)
-        # Audit a copy: Paddle may miss a correct image reading. Keep such a
-        # value visible, but never silently claim it is source-verified.
-        issues, evidence = audit_ai(deepcopy(data), pages)
         quality.update(parser="visual_ai",
                        model=os.environ.get("OLLAMA_MODEL", "qwen3-vl:4b"),
                        local_ai_status="vision_evidence_reviewed", evidence_issues=issues,
@@ -719,5 +719,7 @@ def _parse_invoice_visual(pdf_path: str | Path, pages: list[dict[str, Any]],
 
 def parse_invoice_visual(pdf_path, pages, filename, language, mode="auto", progress=None):
     from mapping_coverage import attach_mapping_coverage
-    return attach_mapping_coverage(
-        _parse_invoice_visual(pdf_path, pages, filename, language, mode=mode, progress=progress), pages)
+    from label_value_pairing import apply_invoice_number_candidates
+    result = _parse_invoice_visual(pdf_path, pages, filename, language, mode=mode, progress=progress)
+    apply_invoice_number_candidates(result, pages)
+    return attach_mapping_coverage(result, pages)

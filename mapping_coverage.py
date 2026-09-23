@@ -9,6 +9,11 @@ def mapping_coverage(parsed, pages):
     for index, item in enumerate(data.get('items', [])):
         for key, value in (item.get('field_evidence') or {}).items():
             evidence[f'items[{index}].{key}'] = value
+    from item_scope import scoped_item_evidence, NUMERIC_FIELDS
+    scoped = scoped_item_evidence(data, pages)
+    evidence = {field: entries for field, entries in evidence.items()
+                if not (field.startswith('items[') and field.rsplit('.', 1)[-1] in NUMERIC_FIELDS)}
+    evidence.update(scoped)
     selected = {}
     for field, entries in evidence.items():
         for entry in entries if isinstance(entries, list) else [entries]:

@@ -362,7 +362,7 @@ def table(words):
             if key in hx and any(hx[key]==hx[k] for k in core):
                 hx.pop(key)
         header_y=max(y(headers[k]) for k in core)
-        stop=min((y(w) for w in words if y(w)>header_y+2*h and (normalize(w['text']).strip(' :').casefold() in {'total','مجموع'} or re.match(r'(?i)^total\s*[/：:]', w['text'].strip()) or contains(w['text'],
+        stop=min((y(w) for w in words if y(w)>header_y+2*h and (normalize(w['text']).strip(' :').casefold() in {'total','مجموع','discount','الخصم'} or re.match(r'(?i)^total\s*[/：:]', w['text'].strip()) or contains(w['text'],
                  ('total discount','total price excl vat','subtotal','grand total','gross amount','total amount','total excluding vat','vat summary','tax summary',
                   'taxable total','total vat','total (excl) vat','الإجمالي بدون الضريبة','amount chargeable','declaration','الإفصاح','إجمالي الفاتورة')))),default=float('inf'))
         body=[w for w in words if header_y+h*.6<y(w)<stop]
@@ -389,11 +389,14 @@ def table(words):
         gross_column='amount' in hx and not exclusive and 'vat_amount' in hx and contains(headers['amount']['text'],('total amount','الاجمالي','الإجمالي'))
         for i,anchor in enumerate(unique):
             quantity_missing=numeric(anchor['text']) is None or abs(column_x(anchor)-hx['quantity'])>tolerance('quantity')
-            row=[w for w in body if abs(y(w)-y(anchor))<h*1.15]
+            row_low = (y(unique[i-1])+y(anchor))/2 if i else header_y+h*.6
+            row_high = (y(anchor)+y(unique[i+1]))/2 if i+1<len(unique) else stop
+            row=[w for w in body if row_low < y(w) < row_high and abs(y(w)-y(anchor))<h*1.15]
             def cell(key):
                 if key not in hx:
                     return None
-                return min((w for w in row if numeric(w['text']) is not None and abs(column_x(w)-hx[key])<=tolerance(key)),
+                return min((w for w in row if numeric(w['text']) is not None and abs(column_x(w)-hx[key])<=tolerance(key) and
+                            all(abs(column_x(w)-hx[key]) < abs(column_x(w)-x) for other,x in hx.items() if other!=key)),
                            key=lambda w:(w.get('source')!='targeted_ocr',abs(column_x(w)-hx[key]),abs(y(w)-y(anchor)),w['text']),default=None)
             price,amount,tax,discount=cell('unit_price'),cell('amount'),cell('vat_amount'),cell('discount')
             if price is anchor: price=None
@@ -885,7 +888,7 @@ def parse_layout(pages,filename,language):
     # A shared TOTAL row places net and VAT under their respective table columns.
     column_words=clean[footer_index]
     for label in footer:
-        if normalize(label['text']).strip(' :').casefold() not in {'total','مجموع'}:continue
+        if normalize(label['text']).strip(' :').casefold() not in {'total','مجموع','discount','الخصم'}:continue
         for key,aliases in [('subtotal',('amount',)),('vat_amount',('vat',))]:
             heading=min((w for w in column_words if abs(fy(w)-last_header)<fh*3 and contains(w['text'],aliases) and not contains(w['text'],('vat no','vat number'))),key=lambda w:abs(fy(w)-last_header),default=None)
             if heading:

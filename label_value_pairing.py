@@ -82,3 +82,66 @@ def pair_labels(boxes: list[dict[str, Any]], labels: dict[str, tuple[str, ...]] 
                                  "distance": round(distance, 2), "needs_review": float(value.get("confidence") or 0) < 85}
                 break
     return result
+
+
+def invoice_number_candidates(pages):
+    """Rank same-page label-aligned identifiers by geometry, then confidence."""
+    import re
+    from invoice_formatter import DIGIT_TABLE
+    pattern = re.compile(r'(?:\binv\.?\s*no\.?|\binvoice\s*(?:number|no\.?|#)|رقم\s*الفاتورة|تسلسل\s*الفاتورة)', re.I)
+    candidates = []
+    for index, page in enumerate(pages, 1):
+        number = page.get('page', index)
+        words = page.get('words', [])
+        for label in words:
+            match = pattern.search(str(label.get('text', '')))
+            if not match:
+                continue
+            lx, ly, lw, lh = box_geometry(label)
+            tail = str(label.get('text', ''))[match.end():].strip(' :#.-')
+            for word in words:
+                text = tail if word is label else str(word.get('text', '')).strip()
+                value = text.translate(DIGIT_TABLE)
+                if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9/-]{0,31}', value) or not re.search(r'\d', value):
+                    continue
+                if re.fullmatch(r'\d{1,4}[-/]\d{1,2}[-/]\d{2,4}', value):
+                    continue  # Date-shaped values are not invoice identifiers.
+                x, y, w, h = box_geometry(word)
+                if word is not label:
+                    arabic = bool(re.search(r'[\u0600-\u06ff]', match[0]))
+                    if (arabic and x+w > lx+lw*.2) or (not arabic and x < lx+lw*.8):
+                        continue
+                height = max(lh, h, 1)
+                dy = abs((y+h/2)-(ly+lh/2))
+                gap = max(lx-(x+w), x-(lx+lw), 0)
+                if word is not label and (dy > height*.5 or gap > height*12):
+                    continue
+                score = 0 if word is label else (4*dy+gap)/height
+                candidates.append(dict(value=value, page=number, bbox=[x,y,w,h],
+                    text=word.get('text'), confidence=word.get('confidence'),
+                    source=word.get('source','ocr'), label=label.get('text'),
+                    label_bbox=[lx,ly,lw,lh], distance=score))
+    candidates.sort(key=lambda c:(c['distance'], -float(c['confidence'] or 0), c['page'], c['bbox'][1], c['bbox'][0], c['value']))
+    unique=[]
+    for candidate in candidates:
+        if not any(c['value']==candidate['value'] and c['page']==candidate['page'] for c in unique):
+            unique.append(candidate)
+    return unique
+
+
+def apply_invoice_number_candidates(result, pages):
+    candidates = invoice_number_candidates(pages)
+    if not candidates:
+        return result
+    data, quality = result['data'], result['quality']
+    selected = candidates[0]
+    data.setdefault('invoice', {})['invoice_number'] = selected['value']
+    data.setdefault('field_evidence', {})['invoice.invoice_number'] = {
+        key:selected[key] for key in ('page','text','confidence','source','bbox')}
+    quality['invoice_number_candidates'] = candidates
+    if len(candidates)>1:
+        quality.update(needs_review=True, overall_status='needs_review')
+        quality.setdefault('review_reasons', []).append(
+            'Invoice number selected by label alignment/distance: '+selected['value']+
+            '; alternate candidate found, not selected: '+', '.join(c['value'] for c in candidates[1:])+'. Verify printed labels and handwritten references.')
+    return result

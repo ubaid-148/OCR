@@ -231,5 +231,7 @@ def parse_invoice_hybrid(pages, source_filename, language, mode='auto'):
            for page in pages for a in page.get('targeted_ocr',{}).get('accepted',[])):
         quality.update(needs_review=True,overall_status='needs_review')
         quality.setdefault('review_reasons',[]).append('Check names and item descriptions recovered by targeted OCR against the PDF.')
+    from label_value_pairing import apply_invoice_number_candidates
+    apply_invoice_number_candidates(result, pages)
     from mapping_coverage import attach_mapping_coverage
     return attach_mapping_coverage(result, pages)
