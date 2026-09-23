@@ -50,6 +50,12 @@ def verify(raw_dir, output, source_checks=None):
     return summary
 
 
+def verification_failed(summary):
+    """A clean parser run is not a pass when supplied source checks disagree."""
+    return bool(summary['errors'] or
+                summary['source_checks_matched'] != summary['source_checks_total'])
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('raw_dir', type=Path)
@@ -58,4 +64,4 @@ if __name__ == '__main__':
     args = parser.parse_args()
     summary = verify(args.raw_dir, args.output, args.source_checks)
     print(json.dumps({k:v for k,v in summary.items() if k not in {'files','source_checks'}}, indent=2))
-    raise SystemExit(1 if summary['errors'] else 0)
+    raise SystemExit(1 if verification_failed(summary) else 0)

@@ -21,7 +21,8 @@ from page_rotation import clamp_crop_bbox, page_orientation, render_upright_page
 
 TEXT_FIELDS = {
     "supplier": ("name_ar", "name_en", "branch", "vat_number", "cr_number", "building_no",
-                 "street", "area", "post_code", "additional_no", "short_address", "country", "city"),
+                 "street", "area", "post_code", "additional_no", "short_address", "country", "city",
+                 "address", "business_type"),
     "invoice": ("invoice_number", "date", "date_of_supply", "hijri_date", "time", "ref_no",
                 "payment_method", "page"),
     "customer": ("customer_code", "name", "name_ar", "name_en", "vat_number", "cr_number",
@@ -32,6 +33,7 @@ ITEM_TEXT = ("item_code", "description", "description_ar", "description_en", "un
 ITEM_NUMBERS = ("quantity", "unit_price", "discount", "amount", "tax_rate", "vat_amount", "gross_amount")
 TOTAL_NUMBERS = ("subtotal", "discount", "other_charges", "taxable_amount", "vat_rate", "vat_amount", "net_amount")
 VAT_NUMBERS = ("before_tax", "tax_amount", "inc_tax")
+BANK_FIELDS = ("beneficiary", "bank_name", "account_no", "branch", "iban")
 
 
 def _object_schema(text_fields=(), number_fields=()):
@@ -54,7 +56,8 @@ FULL_SCHEMA = {
         "items": {"type": "array", "items": _object_schema(ITEM_TEXT, ITEM_NUMBERS)},
         "amount_in_words_ar": {"type": ["string", "null"]},
         "vat_summary": _object_schema(("tax_code",), VAT_NUMBERS),
-        "totals": _object_schema(("currency",), TOTAL_NUMBERS),
+        "totals": _object_schema(("currency", "amount_in_words"), TOTAL_NUMBERS),
+        "bank_details": _object_schema(BANK_FIELDS),
         "other_fields": {"type": "array", "items": {
             "type": "object", "additionalProperties": False,
             "properties": {"label": {"type": "string"}, "value": {"type": "string"},
@@ -139,6 +142,9 @@ def normalize_full(raw: dict[str, Any], filename: str, language: str,
     totals = raw.get("totals") if isinstance(raw.get("totals"), dict) else {}
     data["totals"] = {key: _number(totals.get(key)) for key in TOTAL_NUMBERS}
     data["totals"]["currency"] = _text(totals.get("currency"))
+    data["totals"]["amount_in_words"] = _text(totals.get("amount_in_words"))
+    bank = raw.get("bank_details") if isinstance(raw.get("bank_details"), dict) else {}
+    data["bank_details"] = {key: _text(bank.get(key)) for key in BANK_FIELDS}
     data["other_fields"] = []
     if isinstance(raw.get("other_fields"), list):
         for field in raw["other_fields"]:
@@ -363,7 +369,7 @@ def merge_pages(parts: list[dict[str, Any]]) -> tuple[dict[str, Any], list[str]]
                 merged[key] = part.get(key)
             elif part.get(key) and merged[key] != part[key]:
                 conflicts.append(f"Conflicting {key} on page {page_no}")
-        for section in (*TEXT_FIELDS, "totals", "vat_summary"):
+        for section in (*TEXT_FIELDS, "totals", "vat_summary", "bank_details"):
             for key, value in part[section].items():
                 if merged[section].get(key) is None:
                     merged[section][key] = value
@@ -380,6 +386,26 @@ def merge_pages(parts: list[dict[str, Any]]) -> tuple[dict[str, Any], list[str]]
 def reconcile_with_spatial(data: dict[str, Any], spatial: dict[str, Any]) -> list[str]:
     """Copy printed, independently located fields; never calculate absent line values."""
     notes: list[str] = []
+    # These printed fields used to survive fast mode but disappear when vision
+    # won. Keep missing OCR values and surface disagreements without overwriting.
+    for section, keys in (("supplier", ("address", "business_type", "cr_number")),
+                          ("customer", ("address", "cr_number")),
+                          ("totals", ("amount_in_words",)),
+                          ("bank_details", BANK_FIELDS)):
+        target = data.setdefault(section, {})
+        for key in keys:
+            value = (spatial.get(section) or {}).get(key)
+            if value in (None, ""):
+                continue
+            if target.get(key) in (None, ""):
+                target[key] = value
+                notes.append(f"Filled {section}.{key} from positioned OCR; verify against PDF.")
+            elif target[key] != value:
+                notes.append(f"Vision and positioned OCR disagree on {section}.{key}.")
+    extras = data.setdefault("other_fields", [])
+    for field in spatial.get("other_fields") or []:
+        if field not in extras:
+            extras.append(deepcopy(field))
     for section, keys in (("supplier", ("vat_number",)),
                           ("customer", ("vat_number",)),
                           ("invoice", ("invoice_number", "date", "date_of_supply", "time")),
@@ -477,7 +503,7 @@ def _enrich_spatial_header(fallback: dict[str, Any], visual_data: dict[str, Any]
             if not spatial_section.get(key) and visual_data[section].get(key):
                 spatial_section[key] = visual_data[section][key]
                 added += 1
-    for section in ("totals", "vat_summary"):
+    for section in ("totals", "vat_summary", "bank_details"):
         spatial_section = spatial.setdefault(section, {})
         for key, value in visual_data[section].items():
             if spatial_section.get(key) is None and value is not None:

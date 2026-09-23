@@ -12,7 +12,8 @@ from visual_invoice import ITEM_NUMBERS, ITEM_TEXT, TEXT_FIELDS, TOTAL_NUMBERS, 
 
 SCHEMA_VERSION = "1.2"
 PARTY_FIELDS = {
-    "supplier": (*TEXT_FIELDS["supplier"], "commercial_registration", "address", "business_type"),
+    "supplier": (*(key for key in TEXT_FIELDS["supplier"] if key not in {"address", "business_type"}),
+                 "commercial_registration", "address", "business_type"),
     "customer": (*TEXT_FIELDS["customer"], "commercial_registration"),
 }
 PUBLIC_TOTAL_FIELDS = (*TOTAL_NUMBERS, "currency", "amount_in_words")

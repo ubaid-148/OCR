@@ -1,5 +1,24 @@
 # Missing-field and flow fixes — 24 September 2026
 
+## Follow-up verification
+
+The image-first path now retains bank details, supplier address/business type,
+amount-in-words, and explicit unknown OCR references. Previously these could be
+present in spatial extraction yet disappear when the vision candidate was used.
+Missing optional values are filled from positioned OCR; disagreements retain the
+vision value and produce review notes. Later-page bank details are merged with
+conflict reporting. Regression tests cover normalization, public JSON and the
+auto-mode orchestration; model inference is mocked.
+
+265 Python tests and the browser upload queue check pass. Cached replay still
+produces 111 schema-valid documents with zero parser exceptions, and matches
+33/35 selected source values. The verification command now exits nonzero when
+supplied source expectations fail, even if every document parsed successfully.
+The two recognition omissions remain unresolved with the old cached OCR. Live
+Paddle/vision extraction remains unverified; no universal accuracy claim is made.
+
+## Earlier mapping fixes
+
 The confirmed five mapping omissions in the prior source check are fixed. This
 is not a claim that all possible PDFs now extract completely or correctly.
 
