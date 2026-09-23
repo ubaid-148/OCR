@@ -70,3 +70,21 @@ The verification helper can replay raw OCR without overwriting its input directo
 
 Use the updated Colab runtime (rerun setup) or restart the web server to load
 these changes. `auto` requires the local vision setup; `fast` is explicitly OCR-only.
+
+## Supplied live Colab failure: follow-up
+
+Replayed the user's actual 9480 raw OCR and supplied final vision values through
+reconciliation (not fresh model inference). The positioned invoice date now wins
+its conflicting vision date with an explicit review note: 2026-03-11. The missing
+Arabic supplier name is retained from spatial extraction. A zero in a uniquely
+matched item's optional financial cell is cleared when spatial extraction has
+neither a value nor evidence; supported printed zeros remain intact. Vision prompts
+now explicitly separate handwriting and phone lists from printed invoice fields.
+269 regression tests pass. Replay output is local under
+`benchmark_outputs/live-sample-fix/reconciliation.json`.
+
+Customer VAT remains misrecognized in supplied raw OCR; customer name, item-code
+spelling, amount-in-words and runtime performance are not resolved by these changes.
+No source value is hard-coded. Fresh GPU inference remains necessary to evaluate
+recognition and prompt changes. The previous live run took 657.59 seconds in vision,
+including repeated truncated header generation; no speed improvement is claimed.
