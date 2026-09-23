@@ -26,7 +26,6 @@ const clientError = (message) => ({
   ocr_device: 'unknown',
   page_orientations: [],
   timings_seconds: {},
-  unmapped_text: [],
   error: {code: 'client_error', message},
 });
 form.addEventListener('submit', async (event) => {

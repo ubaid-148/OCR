@@ -13,7 +13,7 @@ class MappingCoverageTests(unittest.TestCase):
         self.assertEqual(parsed['unmapped_text'],[{'page':2,'text':'40'}])
         self.assertEqual(parsed['mapping_coverage']['assigned_boxes'],1)
         response=clean_invoice_response(parsed)
-        self.assertEqual(response['unmapped_text'],parsed['unmapped_text'])
+        self.assertNotIn('unmapped_text',response)
         validate_response_schema(response)
 
     def test_web_preserves_fields_already_available_in_compact_result(self):
@@ -27,7 +27,8 @@ class MappingCoverageTests(unittest.TestCase):
         self.assertEqual(response['data']['bank_details']['account_no'],'000987')
         with patch('invoice_result.parse_invoice_hybrid',return_value=parsed):
             compact=extract_result({'pages':[]},'example.pdf')
-        self.assertEqual(compact['unmapped_text'],response['unmapped_text'])
+        self.assertNotIn('unmapped_text',compact)
+        self.assertNotIn('unmapped_text',response)
 
     def test_footer_zero_cannot_support_blank_item_vat(self):
         from test_layout_invoice import box

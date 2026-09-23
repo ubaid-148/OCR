@@ -6,6 +6,15 @@ from invoice_result import extract_result
 
 
 class InvoiceResultTests(unittest.TestCase):
+    def test_unmapped_text_is_only_in_details(self):
+        parsed={'data':{},'quality':{},'unmapped_text':[{'page':1,'text':'Logo'}], 'mapping_coverage':{'records':[]}}
+        details={}
+        with patch('invoice_result.parse_invoice_hybrid',return_value=parsed):
+            result=extract_result({'pages':[]},'example.pdf',details=details)
+        self.assertNotIn('unmapped_text',result)
+        self.assertEqual(details['unmapped_text'],parsed['unmapped_text'])
+        self.assertIn('mapping_coverage',details)
+
     def test_concise_output_preserves_review_and_zero_values(self):
         parsed = {'data': {'items': [{'description': 'Paint', 'quantity': None, 'unit_price': 90,
                                      'amount': 180, 'field_evidence': {'bbox': [1,2,3,4]}}],

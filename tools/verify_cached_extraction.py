@@ -26,7 +26,7 @@ def verify(raw_dir, output, source_checks=None):
             results[path.stem] = result
             rows.append({'file': path.stem, 'items': len(result['items']),
                          'missing': details['quality'].get('missing_fields', []),
-                         'unmapped_text': len(result['unmapped_text']), 'schema_valid': True})
+                         'unmapped_text': len(details.get('unmapped_text', [])), 'schema_valid': True})
         except Exception as error:
             rows.append({'file': path.stem, 'error': f'{type(error).__name__}: {error}'})
     checks = []

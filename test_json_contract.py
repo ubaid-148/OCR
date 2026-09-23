@@ -90,3 +90,10 @@ class JsonContractTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class DiagnosticSeparationTests(unittest.TestCase):
+    def test_public_and_error_json_exclude_unmapped_text(self):
+        payload={'data':{},'quality':{},'unmapped_text':[{'page':1,'text':'Logo'}]}
+        self.assertNotIn('unmapped_text',clean_invoice_response(payload))
+        self.assertNotIn('unmapped_text',error_invoice_response('failed','failed'))
+        self.assertEqual(payload['unmapped_text'],[{'page':1,'text':'Logo'}])

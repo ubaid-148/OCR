@@ -82,7 +82,6 @@ def extract_result(payload, filename, language="eng+ara", *, pdf_path=None, mode
         "other_fields": data.get("other_fields", []),
         "bank_details": data.get("bank_details"),
         "review_notes": list(dict.fromkeys(notes)),
-        "unmapped_text": parsed.get("unmapped_text", []),
     }
 
 

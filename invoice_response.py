@@ -20,7 +20,7 @@ PUBLIC_TOTAL_FIELDS = (*TOTAL_NUMBERS, "currency", "amount_in_words")
 TOP_LEVEL_KEYS = (
     "schema_version", "status", "pipeline_version", "parser", "local_ai_status",
     "local_ai_error", "data", "field_reviews", "review_notes", "ocr_device", "page_orientations",
-    "timings_seconds", "unmapped_text", "error",
+    "timings_seconds", "error",
 )
 
 
@@ -201,10 +201,6 @@ def validate_response_schema(response: Any) -> dict[str, Any]:
         raise ValueError("Invoice response review_notes are invalid")
     if not isinstance(response["page_orientations"], list) or not isinstance(response["timings_seconds"], dict):
         raise ValueError("Invoice response diagnostics are invalid")
-    if not isinstance(response["unmapped_text"], list) or not all(
-            isinstance(entry, dict) and isinstance(entry.get("page"), int) and
-            isinstance(entry.get("text"), str) for entry in response["unmapped_text"]):
-        raise ValueError("Invoice response unmapped_text must contain page/text entries")
     error = response["error"]
     if response["status"] == "error":
         if not isinstance(error, dict) or not isinstance(error.get("message"), str):
@@ -263,7 +259,6 @@ def clean_invoice_response(payload: Any) -> dict[str, Any]:
         "ocr_device": str(payload.get("ocr_device", "unknown")),
         "page_orientations": _json_safe(payload.get("page_orientations") or []),
         "timings_seconds": _json_safe(payload.get("timings_seconds") or {}),
-        "unmapped_text": _json_safe(payload.get("unmapped_text", [])),
         "error": None,
     }
     return validate_response_schema(response)
@@ -280,7 +275,7 @@ def error_invoice_response(code: Any, message: Any, partial_payload: Any = None)
             "pipeline_version": "unknown", "parser": "failed",
             "local_ai_status": "not_reported", "local_ai_error": None, "data": _empty_data(),
             "field_reviews": [], "review_notes": [], "ocr_device": "unknown",
-            "page_orientations": [], "timings_seconds": {}, "unmapped_text": [], "error": None,
+            "page_orientations": [], "timings_seconds": {}, "error": None,
         }
     response["status"] = "error"
     response["error"] = {"code": _json_safe(code), "message": str(message)[:2000]}
