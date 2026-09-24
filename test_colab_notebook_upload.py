@@ -65,7 +65,7 @@ class ColabUploadTests(unittest.TestCase):
             root.joinpath('colab_runtime.py').touch()
         else:
             scope['OCR_PYTHON'] = sys.executable
-        with patch.dict('sys.modules', modules), redirect_stdout(output):
+        with patch.dict('sys.modules', modules), patch('importlib.reload', side_effect=lambda module: module), redirect_stdout(output):
             if fail_ocr:
                 with self.assertRaisesRegex(RuntimeError, 'OCR failed'):
                     exec(compile(self.source(), 'upload-cell', 'exec'), scope)

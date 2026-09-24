@@ -3,6 +3,12 @@
 
 # Local Invoice OCR
 
+Colab step 3 uses the built-in file uploader. Choose PDFs and wait for upload to
+finish; extraction starts automatically, without a separate Process button.
+Set the mode in step 2 and language/diagnostics in step 3 before running it.
+Results display inline and JSON downloads start automatically. Rerunning step 3
+reloads the upload UI module and clears its previous output.
+
 The Colab upload flow now uses one isolated worker per batch, keeping OCR models
 loaded between PDFs. Eligible upright, image-free PDFs use the existing native
 text checks instead of forced raster OCR; scans still use PaddleOCR. Explicit
