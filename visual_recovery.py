@@ -91,8 +91,9 @@ def recover_page(pdf_path, number, count, raw, ocr_page, ask, diagnostics, progr
         header_missing = header_missing or not any(supplier.get(k) for k in ('name_ar','name_en')) or not any(customer.get(k) for k in ('name','name_ar','name_en'))
     footer_present = any(contains(w.get('text', ''), ('subtotal','grand total','net amount','vat summary','المجموع','الإجمالي')) for w in ocr_page.get('words', []))
     totals_missing = (bool(totals) or footer_present) and any(not _present(totals.get(k)) for k in ('subtotal', 'vat_amount', 'net_amount'))
-    item_missing = (len(items) < len(rows) or any(any(not _present(item.get(k)) for k in
-                    ('description', 'quantity', 'unit_price', 'amount')) for item in items)
+    item_missing = (len(items) < len(rows) or any(
+                    not any(_present(item.get(k)) for k in ('description', 'description_ar', 'description_en'))
+                    or any(not _present(item.get(k)) for k in ('quantity', 'unit_price', 'amount')) for item in items)
                     or not items and header_hint(ocr_page.get('words', [])) is not None)
     if not (header_missing or totals_missing or item_missing):
         return result, notes

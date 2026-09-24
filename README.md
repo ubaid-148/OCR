@@ -3,6 +3,18 @@
 
 # Local Invoice OCR
 
+The Colab upload flow now uses one isolated worker per batch, keeping OCR models
+loaded between PDFs. Eligible upright, image-free PDFs use the existing native
+text checks instead of forced raster OCR; scans still use PaddleOCR. Explicit
+`OCR_FORCE_RASTER=true` remains available. The first scanned PDF still pays model
+startup cost, and Accuracy mode still runs the original-page vision checks.
+Localized item descriptions no longer trigger an extra table reread simply
+because the generic description key is absent. Invoice-number candidates cannot
+silently replace an existing conflicting reading; disagreements require review,
+and low-confidence candidates do not fill missing numbers.
+These changes have local regression coverage; fresh GPU timing and extraction
+accuracy must still be checked on the affected source PDFs.
+
 Colab-first application for multi-layout invoice PDFs. In Accuracy mode, a local
 vision model reads **the original image of every PDF page**, while PaddleOCR
 provides independent text/position evidence. The application returns full

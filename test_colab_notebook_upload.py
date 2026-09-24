@@ -39,26 +39,33 @@ class ColabUploadTests(unittest.TestCase):
         invoice = {'invoice_number': 'INV-7', 'items': [],
                    'validation': {'passed': False, 'warnings': ['needs_review: missing items']}}
 
-        def process(command, **kwargs):
-            calls.append(command)
-            if 'coordinate_ocr.py' in command[2]:
+        worker_module = types.ModuleType('colab_worker')
+        class Worker:
+            def __init__(self, python, project):
+                pass
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                pass
+            def run(self, pdf, raw, output, details, filename, language, mode):
+                calls.append(dict(pdf=pdf, raw=raw, output=output, details=details,
+                                  filename=filename, language=language, mode=mode))
                 if fail_ocr:
-                    return types.SimpleNamespace(returncode=1, stderr='OCR failed', stdout='')
-                Path(command[4]).write_text('{"pages": []}')
-            else:
-                Path(command[command.index('--output') + 1]).write_text(json.dumps(invoice))
-                Path(command[command.index('--details-output') + 1]).write_text('{"quality":{"parser":"visual_ai"}}')
-            return types.SimpleNamespace(returncode=0, stderr='', stdout='')
+                    raise RuntimeError('OCR failed')
+                raw.write_text('{"pages": []}')
+                output.write_text(json.dumps(invoice))
+                details.write_text('{"quality":{"parser":"visual_ai"}}')
+        worker_module.InvoiceWorker = Worker
 
         output = io.StringIO()
-        modules = {'google': google, 'google.colab': colab, 'google.colab.files': files,'colab_vision':vision, 'colab_upload_ui':ui}
+        modules = {'google': google, 'google.colab': colab, 'google.colab.files': files,'colab_vision':vision, 'colab_upload_ui':ui, 'colab_worker':worker_module}
         scope = {'PROJECT_DIR': root}
         if recover_runtime:
             modules['colab_runtime'] = runtime
             root.joinpath('colab_runtime.py').touch()
         else:
             scope['OCR_PYTHON'] = sys.executable
-        with patch.dict('sys.modules', modules), patch('subprocess.run', side_effect=process), redirect_stdout(output):
+        with patch.dict('sys.modules', modules), redirect_stdout(output):
             if fail_ocr:
                 with self.assertRaisesRegex(RuntimeError, 'OCR failed'):
                     exec(compile(self.source(), 'upload-cell', 'exec'), scope)
@@ -69,20 +76,18 @@ class ColabUploadTests(unittest.TestCase):
     def test_upload_displays_and_downloads_only_final_invoice(self):
         with tempfile.TemporaryDirectory() as directory:
             calls, downloads, output, invoice, _ = self.run_cell(Path(directory))
-            self.assertEqual(len(calls), 2)
-            self.assertTrue(calls[1][1].endswith('invoice_result.py'))
+            self.assertEqual(len(calls), 1)
             self.assertEqual(len(downloads), 1)
             self.assertEqual(json.loads(Path(downloads[0]).read_text()), invoice)
             self.assertIn('INV-7', output)
             self.assertIn('needs_review', output)
             self.assertNotIn('RAW OCR', output)
-            self.assertFalse(Path(calls[0][3]).exists())  # Temporary PDF removed.
+            self.assertFalse(Path(calls[0]['pdf']).exists())  # Temporary PDF removed.
             diagnostic=Path(downloads[0]).with_name('invoice-invoice-diagnostics.json')
             raw=json.loads(diagnostic.read_text())
             self.assertEqual(raw['pages'],[])
             self.assertEqual(raw['extraction_details']['quality']['parser'],'visual_ai')
-            self.assertIn('--pdf',calls[1])
-            self.assertEqual(calls[1][calls[1].index('--mode')+1],'auto')
+            self.assertEqual(calls[0]['mode'], 'auto')
 
     def test_ocr_failure_does_not_parse_or_download_a_result(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -95,7 +100,7 @@ class ColabUploadTests(unittest.TestCase):
             uploads = {'a?.pdf': b'%PDF-1.7\nfixture', 'bad.pdf': b'invalid',
                        'a!.PDF': b'%PDF-1.7\nfixture'}
             calls, downloads, output, _, _ = self.run_cell(Path(directory), uploads=uploads)
-            self.assertEqual(len(calls), 4)
+            self.assertEqual(len(calls), 2)
             self.assertEqual(len(downloads), 2)
             self.assertNotEqual(downloads[0], downloads[1])
             self.assertTrue(all(Path(path).is_file() for path in downloads))
@@ -109,7 +114,7 @@ class ColabUploadTests(unittest.TestCase):
                 root, recover_runtime=True
             )
             self.assertEqual(preparations, [(root, False)])
-            self.assertEqual(len(calls), 2)
+            self.assertEqual(len(calls), 1)
             self.assertEqual(len(downloads), 1)
             self.assertIn('preparing it now', output)
 

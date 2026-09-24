@@ -25,7 +25,7 @@ class LabelValueMappingTests(unittest.TestCase):
 
     def test_invoice_candidate_uses_label_geometry_not_confidence(self):
         from label_value_pairing import apply_invoice_number_candidates
-        near=dict(box('9480',190,100),confidence=70)
+        near=dict(box('9480',190,100),confidence=90)
         far=box('692',400,100)
         result={'data':{},'quality':{}}
         apply_invoice_number_candidates(result,[{'page':1,'words':[box('Inv. No.',100,100),far,near]}])
@@ -50,3 +50,29 @@ class LabelValueMappingTests(unittest.TestCase):
         self.assertEqual(result['data']['invoice']['invoice_number'],candidates[0]['value'])
         self.assertLess(candidates[0]['distance'],candidates[1]['distance'])
         self.assertTrue(result['quality']['needs_review'])
+
+    def test_late_candidate_does_not_overwrite_selected_invoice_number(self):
+        from label_value_pairing import apply_invoice_number_candidates
+        result = {'data': {'invoice': {'invoice_number': 'INV-001'}}, 'quality': {}}
+        pages = [{'words': [box('Inv. No.', 100, 100), box('9480', 190, 100)]}]
+        apply_invoice_number_candidates(result, pages)
+        apply_invoice_number_candidates(result, pages)
+        self.assertEqual(result['data']['invoice']['invoice_number'], 'INV-001')
+        self.assertTrue(result['quality']['needs_review'])
+        self.assertEqual(len(result['quality']['review_reasons']), 1)
+
+    def test_low_confidence_candidate_is_not_promoted(self):
+        from label_value_pairing import apply_invoice_number_candidates
+        result = {'data': {}, 'quality': {}}
+        pages = [{'words': [box('Inv. No.', 100, 100),
+                             dict(box('9480', 190, 100), confidence=30)]}]
+        apply_invoice_number_candidates(result, pages)
+        self.assertIsNone(result['data']['invoice'].get('invoice_number'))
+        self.assertTrue(result['quality']['needs_review'])
+
+    def test_native_candidate_does_not_need_synthetic_confidence(self):
+        from label_value_pairing import apply_invoice_number_candidates
+        result = {'data': {}, 'quality': {}}
+        apply_invoice_number_candidates(result, [{'words': [box('Inv. No.', 100, 100),
+            dict(box('00042', 190, 100), source='native_text', confidence=None)]}])
+        self.assertEqual(result['data']['invoice']['invoice_number'], '00042')

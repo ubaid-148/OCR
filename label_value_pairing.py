@@ -135,10 +135,28 @@ def apply_invoice_number_candidates(result, pages):
         return result
     data, quality = result['data'], result['quality']
     selected = candidates[0]
-    data.setdefault('invoice', {})['invoice_number'] = selected['value']
+    quality['invoice_number_candidates'] = candidates
+    invoice = data.setdefault('invoice', {})
+    existing = invoice.get('invoice_number')
+    if existing not in (None, '') and str(existing) != selected['value']:
+        quality.update(needs_review=True, overall_status='needs_review')
+        reason = (f'invoice.invoice_number readings disagree: retained {existing}; '
+                  f'label-aligned OCR candidate is {selected["value"]}. Verify against the PDF.')
+        reasons = quality.setdefault('review_reasons', [])
+        if reason not in reasons:
+            reasons.append(reason)
+        return result
+    reliable = selected['source'] == 'native_text' or float(selected['confidence'] or 0) >= 85
+    if existing in (None, '') and not reliable:
+        quality.update(needs_review=True, overall_status='needs_review')
+        reason = 'invoice.invoice_number: label-aligned OCR candidate has low confidence; value remains unreadable.'
+        reasons = quality.setdefault('review_reasons', [])
+        if reason not in reasons:
+            reasons.append(reason)
+        return result
+    invoice['invoice_number'] = selected['value']
     data.setdefault('field_evidence', {})['invoice.invoice_number'] = {
         key:selected[key] for key in ('page','text','confidence','source','bbox')}
-    quality['invoice_number_candidates'] = candidates
     if len(candidates)>1:
         quality.update(needs_review=True, overall_status='needs_review')
         quality.setdefault('review_reasons', []).append(

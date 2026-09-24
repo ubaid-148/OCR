@@ -29,7 +29,9 @@ def gpu_attached() -> bool:
 
 def configure_environment(use_gpu: bool) -> None:
     os.environ["OCR_TARGETED_RETRY"] = "true"
-    os.environ["OCR_FORCE_RASTER"] = "true"
+    # Use the conservative native-text eligibility checks before rasterizing.
+    # Scans and unsafe text layers still take the full OCR path.
+    os.environ.setdefault("OCR_FORCE_RASTER", "false")
     os.environ["USE_LOCAL_AI"] = "false"
     os.environ["OCR_DEVICE"] = "gpu:0" if use_gpu else "cpu"
     os.environ.pop("OCR_PYTHON_EXE", None)

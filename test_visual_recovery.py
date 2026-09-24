@@ -6,6 +6,20 @@ from visual_invoice import ask_visual
 
 
 class VisualRecoveryTests(unittest.TestCase):
+    def test_localized_description_does_not_trigger_redundant_table_reread(self):
+        for key in ('description_ar', 'description_en'):
+            raw = {'invoice': {'invoice_number': 'A-1', 'date': '2026-03-01'},
+                   'supplier': {'name_en': 'Seller'}, 'customer': {'name': 'Buyer'},
+                   'totals': {'subtotal': 10, 'vat_amount': 0, 'net_amount': 10},
+                   'items': [{key: 'Product', 'quantity': 1, 'unit_price': 10, 'amount': 10}]}
+            ask = Mock()
+            with patch('visual_recovery.recovery_images') as render:
+                result, notes = recover_page('source.pdf', 1, 1, raw, {}, ask, [])
+            ask.assert_not_called()
+            render.assert_not_called()
+            self.assertEqual(result, raw)
+            self.assertEqual(notes, [])
+
     def test_truncated_table_gets_one_larger_budget_retry(self):
         replies=[{'message':{'content':'{}'}},
                  {'done_reason':'length','eval_count':4096,'message':{'content':'{"items":['}},
