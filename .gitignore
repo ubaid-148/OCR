@@ -21,3 +21,6 @@ adapter_model.bin
 
 # Generated local Colab delivery artifacts
 dist/
+
+# macOS Finder metadata
+.DS_Store
