@@ -87,4 +87,4 @@ def show_upload_form(process, mode='auto', language='eng+ara', diagnostics=False
         widgets.HTML('<h3>Results</h3>'),results,log_panel],
         layout=widgets.Layout(border='1px solid #dbe3ee',padding='24px',max_width='820px',width='100%'))
     display(panel)
-    return panel
+    # Return None: a final notebook expression otherwise displays the widget again.
