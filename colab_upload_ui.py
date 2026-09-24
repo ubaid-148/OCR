@@ -2,6 +2,8 @@
 from html import escape
 from pathlib import Path
 
+UPLOAD_UI_VERSION = "native-upload-v2"
+
 
 def upload_values(value):
     entries = value.values() if isinstance(value, dict) else value
@@ -32,7 +34,7 @@ def show_upload_form(process, mode='auto', language='eng+ara', diagnostics=False
     from google.colab import files
 
     clear_output(wait=True)
-    print('INVOICE OCR — native Colab upload')
+    print('INVOICE OCR — ' + UPLOAD_UI_VERSION)
     print('Mode:', 'Accuracy (OCR + vision)' if mode == 'auto' else 'Fast (OCR only)')
     print('Language:', language)
     print('Choose your PDFs below. Processing starts when upload finishes.', flush=True)

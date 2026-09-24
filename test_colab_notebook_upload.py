@@ -33,6 +33,7 @@ class ColabUploadTests(unittest.TestCase):
             preparations.append((project, require_gpu)) or sys.executable
         )
         ui = types.ModuleType('colab_upload_ui')
+        ui.UPLOAD_UI_VERSION = 'native-upload-v2'
         ui.show_upload_form = lambda process, **kwargs: process(files.upload(), kwargs['mode'], kwargs['language'], kwargs['diagnostics'], lambda *args: None, nullcontext())
         ui.show_download = lambda path, label: files.download(str(path))
         calls = []

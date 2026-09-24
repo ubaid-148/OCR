@@ -1,3 +1,5 @@
+> **Upload button stuck or duplicate old form?** Open the [Native Upload v2 notebook](https://colab.research.google.com/github/ubaid-148/OCR/blob/main/colab_native_upload.ipynb) and run cells 1–3. Step 3 must display `INVOICE OCR — native-upload-v2`. This uses Colab’s built-in uploader and starts processing automatically after upload.
+
 > **Colab testing:** open the [GitHub notebook in Colab](https://colab.research.google.com/github/ubaid-148/OCR/blob/main/colab_setup.ipynb)
 > in a fresh runtime and run from cell 1. See [COLAB_TESTING.md](COLAB_TESTING.md) for testing instructions.
 
