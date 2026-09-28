@@ -6,6 +6,31 @@ from invoice_result import extract_result
 
 
 class InvoiceResultTests(unittest.TestCase):
+    def test_recovered_number_is_not_still_reported_missing(self):
+        from local_ai_parser import parse_invoice_hybrid
+        from test_label_value_mapping import box
+        draft = {'data': {'supplier': {}, 'customer': {}, 'invoice': {}, 'totals': {}, 'items': []},
+                 'quality': {'missing_fields': ['invoice.invoice_number'], 'needs_review': True}}
+        pages = [{'page': 1, 'words': [box('Inv. No.', 100, 100), box('00042', 190, 100)]}]
+        with patch('local_ai_parser._parse_invoice_hybrid', return_value=draft):
+            parsed = parse_invoice_hybrid(pages, 'example.pdf', 'eng', mode='fast')
+        self.assertEqual(parsed['data']['invoice']['invoice_number'], '00042')
+        self.assertNotIn('invoice.invoice_number', parsed['quality']['missing_fields'])
+        self.assertIn('invoice.date', parsed['quality']['missing_fields'])
+
+    def test_result_identifies_pdf_and_preserves_audited_box_locations(self):
+        parsed = {'data': {}, 'quality': {'missing_fields': ['invoice.date']},
+                  'mapping_coverage': {'records': [
+                      dict(page=1, text='40', bbox=[10, 20, 30, 10], fields=['totals.subtotal']),
+                      dict(page=2, text='40', bbox=[10, 20, 30, 10], fields=[])]}}
+        with patch('invoice_result.parse_invoice_hybrid', return_value=parsed):
+            result = extract_result({'pages': [], 'timings_seconds': {'model_load': 3}}, 'a.pdf')
+        self.assertEqual(result['source_filename'], 'a.pdf')
+        self.assertEqual(result['field_sources']['totals.subtotal'][0]['page'], 1)
+        self.assertEqual(result['unassigned_ocr'][0]['page'], 2)
+        self.assertEqual(result['missing_fields'], ['invoice.date'])
+        self.assertEqual(result['timings_seconds']['ocr']['model_load'], 3)
+
     def test_unmapped_text_is_only_in_details(self):
         parsed={'data':{},'quality':{},'unmapped_text':[{'page':1,'text':'Logo'}], 'mapping_coverage':{'records':[]}}
         details={}

@@ -77,5 +77,8 @@ form.addEventListener('submit', async (event) => {
     }
     const failed = results.filter(entry => entry.result.status === 'error').length;
     status.textContent = `${results.length - failed}/${selected.length} processed, ${failed} failed — ${Math.floor((Date.now() - started) / 1000)} seconds`;
+    const errors = results.filter(entry => entry.result.status === 'error')
+      .map(entry => `${entry.filename}: ${entry.result.error?.message || 'Processing failed.'}`);
+    if (errors.length) status.textContent += ' — ' + errors.join(' | ');
   } finally { button.disabled = false; }
 });

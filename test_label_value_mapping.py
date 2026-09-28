@@ -8,6 +8,17 @@ def box(text, x, y, page=1):
 
 
 class LabelValueMappingTests(unittest.TestCase):
+    def test_inline_value_wins_over_unrelated_neighbour(self):
+        result = pair_labels([box('Invoice number: INV-007', 100, 100),
+                              box('999', 190, 100)])
+        self.assertEqual(result['invoice_number']['text'], 'INV-007')
+
+    def test_arabic_inline_value_and_zero_are_preserved(self):
+        result = pair_labels([box('الرقم الضريبي：001234', 100, 100),
+                              box('Total VAT: 0', 100, 150)])
+        self.assertEqual(result['tax_number']['text'], '001234')
+        self.assertEqual(result['total_vat']['text'], '0')
+
     def test_label_never_consumes_value_from_another_page(self):
         result = pair_labels([box('Invoice number', 100, 100),
                               box('WRONG-123', 190, 100, page=2)])

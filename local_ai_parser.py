@@ -142,10 +142,6 @@ def _parse_invoice_hybrid(pages: list[dict[str, Any]], source_filename: str, lan
         quality["missing_fields"].append("document.remaining_pages")
     layout = parse_layout(pages, source_filename, language)
     if layout is not None and len(layout["items"]) >= len(fallback["data"]["items"]):
-        validation, quality = _validate(layout)
-        layout["validation"] = validation
-        quality["parser"] = "spatial_layout"
-        quality.pop("model", None)
         evidence = dict(layout.get('field_evidence', {}))
         for i,item in enumerate(layout['items']):
             for key,value in item.get('field_evidence',{}).items():
@@ -233,5 +229,12 @@ def parse_invoice_hybrid(pages, source_filename, language, mode='auto'):
         quality.setdefault('review_reasons',[]).append('Check names and item descriptions recovered by targeted OCR against the PDF.')
     from label_value_pairing import apply_invoice_number_candidates
     apply_invoice_number_candidates(result, pages)
+    # Header enrichment can recover fields after the initial validation. Do
+    # not keep claiming that those recovered values are still missing.
+    validation, refreshed = _validate(result['data'])
+    result['data']['validation'] = validation
+    quality['missing_fields'] = refreshed['missing_fields'] + [
+        field for field in quality.get('missing_fields', [])
+        if field.startswith('document.') and field not in refreshed['missing_fields']]
     from mapping_coverage import attach_mapping_coverage
     return attach_mapping_coverage(result, pages)
