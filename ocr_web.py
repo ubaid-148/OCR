@@ -58,6 +58,9 @@ def multipart_form_fields(message) -> dict[str, object]:
 
 def page(message: str = "") -> bytes:
     safe_message = f'<p class="message">{html.escape(message)}</p>' if message else ""
+    gemini_default = os.environ.get('OCR_DEFAULT_MODE') == 'gemini'
+    gemini_selected = ' selected' if gemini_default else ''
+    local_selected = '' if gemini_default else ' selected'
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>OCR PDF Lab</title>
@@ -76,14 +79,14 @@ button:hover {{ background:#0f4b3d; }}
 .hint {{ color:#55736b; font-size:14px; }}
 </style></head><body><main>
 <h1>OCR PDF Lab</h1>
-<p>Upload an invoice PDF. Accuracy mode reads the original page images with a vision model and checks the result against OCR and invoice arithmetic.</p>
-<p class="hint"><strong>Parser:</strong> Image-first local vision AI with spatial OCR fallback.</p>
+<p>Upload invoice PDFs and choose an extraction service. Gemini sends PDFs directly to Google; local modes use OCR on this computer.</p>
+<p class="hint">Gemini needs an API key entered when starting the app. Its results require checking against the PDF. Direct Gemini upload limit: 10 MB per PDF.</p>
 {safe_message}
 <form method="post" enctype="multipart/form-data">
 <label>PDF files<input type="file" name="pdf" accept="application/pdf,.pdf" multiple required></label>
 <details class="advanced"><summary>Advanced options</summary>
 <label>Languages<select name="languages"><option value="eng+ara">English + Arabic</option><option value="eng">English only</option><option value="ara">Arabic only</option><option value="eng+urd">English + Urdu</option></select></label>
-<label>Processing<select name="mode"><option value="auto">Accuracy (original PDF image + OCR cross-check)</option><option value="fast">Fast (spatial OCR + validation only)</option></select></label>
+<label>Processing<select name="mode"><option value="gemini"{gemini_selected}>Gemini API (direct PDF → JSON)</option><option value="auto"{local_selected}>Local accuracy (original PDF image + OCR cross-check)</option><option value="fast">Local fast (spatial OCR + validation only)</option></select></label>
 <p class="hint">PaddleOCR uses Arabic recognition for Arabic/Urdu selections; it also handles Latin text and numbers.</p>
 </details>
 <button type="submit">Extract Invoice</button>
@@ -94,11 +97,17 @@ button:hover {{ background:#0f4b3d; }}
 class Handler(BaseHTTPRequestHandler):
     def send_json(self, payload, status=200):
         data = response_json_bytes(payload)
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(data)))
-        self.end_headers()
-        self.wfile.write(data)
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            self.close_connection = True
+            self.log_message('Browser disconnected before response delivery; no error response will be retried.')
+            return False
+        return True
 
     def send_failure(self, message, status, partial_payload=None):
         self.send_json(error_invoice_response(status, message, partial_payload), status)
@@ -168,7 +177,8 @@ class Handler(BaseHTTPRequestHandler):
         pdf_part = fields.get("pdf")
         language_part = fields.get("languages")
         mode_part = fields.get("mode")
-        mode = "auto" if mode_part and mode_part.get_content().strip() == "auto" else "fast"
+        requested_mode = mode_part.get_content().strip() if mode_part else os.environ.get('OCR_DEFAULT_MODE', 'fast')
+        mode = requested_mode if requested_mode in {'auto', 'fast', 'gemini'} else 'fast'
         if not accuracy_gpu_configured(mode):
             self.send_failure("Accuracy mode needs a GPU. In Colab select Runtime > Change runtime type > T4 GPU, reconnect, and rerun all cells; Fast mode remains available on CPU.", 400)
             return
@@ -212,6 +222,26 @@ class Handler(BaseHTTPRequestHandler):
         ]
         partial_payload = None
         try:
+            if mode == 'gemini':
+                from gemini_service import extract_gemini
+                from gemini_cache import cached_extraction
+                progress('Reading PDF with Gemini')
+                try:
+                    result, saved_path = cached_extraction(pdf_bytes, filename, extract_gemini)
+                except ValueError as error:
+                    self.send_failure(str(error), 400, {'data': {'source_filename': filename}})
+                    return
+                except RuntimeError as error:
+                    status = 429 if getattr(error, 'status_code', None) == 429 else 502
+                    self.send_failure(str(error), status, {'data': {'source_filename': filename}})
+                    return
+                # Gemini keeps separate invoices in its own explicit envelope;
+                # do not flatten several invoices into the legacy single-invoice schema.
+                result['schema_version'] = 'gemini-trial-1'
+                self.log_message('Gemini result saved: %s%s', saved_path,
+                                 ' (reused; no API call)' if result.get('cache_hit') else '')
+                self.send_json(result)
+                return
             if output_format in {"invoice", "invoice_debug", "json"}:
                 started = perf_counter()
                 if os.environ.get("OCR_PYTHON_EXE"):
@@ -304,8 +334,8 @@ class Handler(BaseHTTPRequestHandler):
         print(f"[{self.log_date_time_string()}] {format % args}")
 
 
-if __name__ == "__main__":
-    if os.environ.get('OCR_PRELOAD', 'false').lower() == 'true':
+def run_server():
+    if os.environ.get('OCR_DEFAULT_MODE') != 'gemini' and os.environ.get('OCR_PRELOAD', 'false').lower() == 'true':
         from coordinate_ocr import _get_model, get_ocr_device
         print('Preparing OCR on', get_ocr_device(), flush=True)
         for language in ('ar', 'en'):
@@ -314,3 +344,7 @@ if __name__ == "__main__":
     server = ThreadingHTTPServer(("127.0.0.1", 8765), Handler)
     print("OCR PDF Lab running at http://127.0.0.1:8765")
     server.serve_forever()
+
+
+if __name__ == "__main__":
+    run_server()

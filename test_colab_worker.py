@@ -6,13 +6,28 @@ import shutil
 import sys
 import tempfile
 import unittest
+import types
 from unittest.mock import patch
 
 from colab_runtime import configure_environment
-from colab_worker import InvoiceWorker, serve
+from colab_worker import InvoiceWorker, serve, process_request
 
 
 class WorkerTests(unittest.TestCase):
+    def test_raw_survives_extraction_failure(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            request = dict(pdf='a.pdf', raw=str(root/'raw.json'), output=str(root/'out.json'),
+                           details=str(root/'details.json'), filename='a.pdf', language='eng', mode='auto')
+            payload = {'pages': [{'page': 1, 'words': []}]}
+            fake_ocr = types.SimpleNamespace(extract_pdf=lambda *a, **k: payload)
+            with patch.dict(sys.modules, {'coordinate_ocr': fake_ocr}), \
+                 patch('invoice_result.extract_result', side_effect=RuntimeError('AI unavailable')):
+                with self.assertRaisesRegex(RuntimeError, 'AI unavailable'):
+                    process_request(request, lambda event: None)
+            self.assertEqual(json.loads((root/'raw.json').read_text()), payload)
+            self.assertFalse((root/'out.json').exists())
+
     def test_worker_keeps_models_loaded_and_survives_failed_pdf(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

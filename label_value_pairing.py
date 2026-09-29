@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from typing import Any
+import re
 
 from bbox_grouping import box_geometry, group_rows
 from invoice_formatter import contains
@@ -65,6 +66,17 @@ def pair_labels(boxes: list[dict[str, Any]], labels: dict[str, tuple[str, ...]] 
         for names in aliases.values() for name in names)}
     for field, names in aliases.items():
         for label in (box for box in boxes if any(_contains(str(box.get("text", "")), name) for name in names)):
+            # Paddle frequently returns a label and its value in one box.
+            # Keep that explicit association instead of taking a neighbour.
+            inline = re.fullmatch(r'\s*(.+?)\s*[:：]\s*(\S.*?)\s*', str(label.get('text', '')))
+            if inline and any(_norm(inline[1]) == _norm(name) for name in names):
+                result[field] = {"page": label.get("page", 1), "text": inline[2],
+                                 "confidence": label.get("confidence"),
+                                 "bbox": label.get("bbox", label), "label": inline[1],
+                                 "distance": 0,
+                                 "needs_review": label.get('source') != 'native_text' and
+                                 float(label.get('confidence') or 0) < 85}
+                break
             candidates = []
             for value in boxes:
                 if value.get("page", 1) != label.get("page", 1):

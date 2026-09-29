@@ -66,11 +66,14 @@ def process_request(request, emit):
     from invoice_result import extract_result
     payload = extract_pdf(Path(request['pdf']), request['language'],
                           progress=lambda stage: emit({'stage': stage}))
+    # Preserve successful OCR even if the later AI/JSON stage fails.
+    Path(request['raw']).write_text(json.dumps(payload, ensure_ascii=False, allow_nan=False),
+                                    encoding='utf-8')
     details = {}
     emit({'stage': 'Extracting and validating invoice fields'})
     invoice = extract_result(payload, request['filename'], request['language'],
                              pdf_path=request['pdf'], mode=request['mode'], details=details)
-    for name, data in (('raw', payload), ('output', invoice), ('details', details)):
+    for name, data in (('output', invoice), ('details', details)):
         Path(request[name]).write_text(json.dumps(data, ensure_ascii=False, allow_nan=False),
                                        encoding='utf-8')
 

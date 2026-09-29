@@ -4,12 +4,14 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+from time import perf_counter
 
 from local_ai_parser import parse_invoice_hybrid
 from visual_invoice import TEXT_FIELDS, ITEM_TEXT, ITEM_NUMBERS, TOTAL_NUMBERS, VAT_NUMBERS
 
 
 def extract_result(payload, filename, language="eng+ara", *, pdf_path=None, mode="fast", details=None):
+    started = perf_counter()
     if mode not in {'fast','auto'}:
         raise ValueError('Extraction mode must be fast or auto')
     if mode=='auto':
@@ -25,6 +27,17 @@ def extract_result(payload, filename, language="eng+ara", *, pdf_path=None, mode
     if details is not None:
         details.update(parsed)
     data, quality = parsed["data"], parsed["quality"]
+    # Use the audited box mapping: matching a number anywhere in the document
+    # does not establish which field or item it belongs to.
+    mapping = parsed.get("mapping_coverage", {})
+    sources = {}
+    unassigned = []
+    for record in mapping.get("records", []):
+        location = {key: record.get(key) for key in ("page", "text", "bbox")}
+        if not record.get("fields"):
+            unassigned.append(location)
+        for field in record.get("fields", []):
+            sources.setdefault(field, []).append(location)
     def select(source, keys):
         return {key: None if source.get(key) == "" else source.get(key) for key in keys}
     notes = []
@@ -63,6 +76,8 @@ def extract_result(payload, filename, language="eng+ara", *, pdf_path=None, mode
     if needs_review and not notes:
         notes.append("Check extracted values against the PDF.")
     return {
+        "source_filename": filename,
+        "extraction_mode": mode,
         "status": "needs_review" if needs_review else "extracted",
         "invoice_number": data.get("invoice", {}).get("invoice_number"),
         "invoice_date": data.get("invoice", {}).get("date"),
@@ -81,6 +96,12 @@ def extract_result(payload, filename, language="eng+ara", *, pdf_path=None, mode
         "handwritten_notes": data.get("handwritten_notes", []),
         "other_fields": data.get("other_fields", []),
         "bank_details": data.get("bank_details"),
+        "field_sources": sources,
+        "unassigned_ocr": unassigned,
+        "missing_fields": list(dict.fromkeys(missing)),
+        "timings_seconds": {"ocr": payload.get("timings_seconds", {}),
+                            "extraction": round(perf_counter() - started, 3),
+                            "stages": parsed.get("stage_timings", {})},
         "review_notes": list(dict.fromkeys(notes)),
     }
 
