@@ -5,20 +5,20 @@ from visual_invoice import ask_visual, _ask_with_retry, vision_attempt_summary, 
 
 
 class VisionBudgetTests(unittest.TestCase):
-    def test_header_starts_at_8192_items_remain_4096(self):
+    def test_header_and_item_budgets_are_bounded_for_fast_local_inference(self):
         diagnostics=[]
         def respond(url, body, **kwargs):
             header='items' not in body['format']['properties']
             return {'done':True,'done_reason':'stop','message':{'content':'{}' if header else '{"items":[]}'}}
         with patch.dict(os.environ,{},clear=True), patch('visual_invoice.request_json',side_effect=respond) as request:
             ask_visual('IMAGE',1,1,diagnostics=diagnostics)
-        self.assertEqual([c.args[1]['options']['num_predict'] for c in request.call_args_list],[8192,4096])
+        self.assertEqual([c.args[1]['options']['num_predict'] for c in request.call_args_list],[2048,1536])
         self.assertEqual([d['status'] for d in diagnostics],['completed','completed'])
         self.assertEqual(vision_attempt_summary(diagnostics)['retry_attempt_count'],0)
 
     def test_header_at_ceiling_does_not_repeat_truncated_call(self):
         diagnostics=[]
-        with patch.dict(os.environ,{},clear=True), patch('visual_invoice.request_json',return_value={'done_reason':'length'}) as request:
+        with patch.dict(os.environ,{'OLLAMA_HEADER_NUM_PREDICT':'8192'},clear=True), patch('visual_invoice.request_json',return_value={'done_reason':'length'}) as request:
             with self.assertRaises(VisionTruncatedError):
                 _ask_with_retry(['IMAGE'],1,1,'header',diagnostics)
         self.assertEqual(request.call_count,1)

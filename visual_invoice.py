@@ -245,8 +245,8 @@ def _record_ollama_metrics(record: dict[str, Any], response: dict[str, Any]) -> 
 
 def _scope_budget(scope):
     if scope == "header":
-        return int(os.environ.get("OLLAMA_HEADER_NUM_PREDICT", "8192"))
-    return int(os.environ.get("OLLAMA_NUM_PREDICT", "4096"))
+        return int(os.environ.get("OLLAMA_HEADER_NUM_PREDICT", "2048"))
+    return int(os.environ.get("OLLAMA_NUM_PREDICT", "1536"))
 
 
 def vision_attempt_summary(records):
@@ -317,8 +317,10 @@ def _ask_scope(images: list[str], page_number: int, page_count: int,
         diagnostics.append(record)
     started = perf_counter()
     try:
+        # A slow local model must not hold an invoice for several minutes.
+        timeout = min(float(os.environ.get("OLLAMA_TIMEOUT_SECONDS", "90")), 90.0)
         response = request_json(os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434/api/chat"),
-                                body, timeout=float(os.environ.get("OLLAMA_TIMEOUT_SECONDS", "180")))
+                                body, timeout=timeout)
         _record_ollama_metrics(record, response)
         if response.get("error"):
             raise ValueError(f"Ollama {scope} error: {response['error']}")
@@ -355,14 +357,18 @@ def _ask_with_retry(images, page_number, page_count, scope, diagnostics=None, **
 
 def ask_visual(images: list[str] | str, page_number: int, page_count: int,
                progress: Callable[[str], None] | None = None,
-               diagnostics: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-    """Two bounded image reads avoid one huge, truncated full-invoice response."""
+               diagnostics: list[dict[str, Any]] | None = None, *, include_items: bool = True) -> dict[str, Any]:
+    """Read headers first; skip table vision when spatial OCR already verifies it."""
     images = [images] if isinstance(images, str) else images
     if progress:
         progress(f"Reading page {page_number}/{page_count}: header and totals")
     header_started = perf_counter()
     header = _ask_with_retry(images, page_number, page_count, "header", diagnostics=diagnostics)
     header_seconds = perf_counter() - header_started
+    if not include_items:
+        header["items"] = []
+        header["_vision_timings"] = {"visual_header": header_seconds, "visual_items": 0}
+        return header
     if progress:
         progress(f"Reading page {page_number}/{page_count}: item table")
     item_started = perf_counter()
@@ -599,14 +605,18 @@ def _parse_invoice_visual(pdf_path: str | Path, pages: list[dict[str, Any]],
         ai_seconds = 0.0
         header_seconds = 0.0
         item_seconds = 0.0
+        fallback_checks = fallback["data"].get("validation", {})
+        item_table_needs_vision = not all(fallback_checks.get(key) is True for key in (
+            "items_calculation_valid", "subtotal_valid", "net_amount_valid"))
         for number, count, images in render_pages(pdf_path, pages):
             render_seconds += perf_counter() - render_started
             if progress:
                 progress(f"Reading original page {number} of {count} with vision AI")
             ai_started = perf_counter()
             try:
-                raw = ask_visual(images, number, count, progress=progress, diagnostics=diagnostics)
-                if os.environ.get("VISION_RECOVERY", "true").lower() not in {"false", "0", "no"} and Path(pdf_path).is_file():
+                raw = ask_visual(images, number, count, progress=progress, diagnostics=diagnostics,
+                                 include_items=item_table_needs_vision)
+                if os.environ.get("VISION_RECOVERY", "false").lower() not in {"false", "0", "no"} and Path(pdf_path).is_file():
                     from visual_recovery import recover_page
                     ocr_page = next((p for i,p in enumerate(pages, 1) if p.get("page", i) == number), {})
                     raw, notes = recover_page(pdf_path, number, count, raw, ocr_page,
