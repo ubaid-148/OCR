@@ -27,7 +27,7 @@ def show_download(path, label='Download JSON'):
     files.download(str(path))
 
 
-def show_upload_form(process, mode='fast', language='eng+ara', diagnostics=False):
+def show_upload_form(process, mode='auto', language='eng+ara', diagnostics=False):
     """Use Colab's native uploader without widget value/click synchronization."""
     from contextlib import nullcontext
     from IPython.display import clear_output
@@ -35,7 +35,7 @@ def show_upload_form(process, mode='fast', language='eng+ara', diagnostics=False
 
     clear_output(wait=True)
     print('INVOICE OCR — ' + UPLOAD_UI_VERSION)
-    print('Mode: PaddleOCR')
+    print('Mode:', 'Accuracy (PaddleOCR + local vision)' if mode == 'auto' else 'Fast (PaddleOCR only)')
     print('Language:', language)
     print('Choose your PDFs below. Processing starts when upload finishes.', flush=True)
     uploaded = files.upload()

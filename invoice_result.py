@@ -20,8 +20,16 @@ VAT_NUMBERS = ("before_tax", "tax_amount", "inc_tax")
 
 def extract_result(payload, filename, language="eng+ara", *, pdf_path=None, mode="fast", details=None):
     started = perf_counter()
-    # Older Colab notebooks may still send "auto"; extraction is PaddleOCR-only.
-    parsed = parse_invoice_hybrid(payload.get("pages", []), filename, language, mode="fast")
+    if mode not in {"fast", "auto"}:
+        raise ValueError("Extraction mode must be fast or auto")
+    if mode == "auto":
+        if pdf_path is None:
+            raise ValueError("Accuracy mode requires the original PDF")
+        from visual_invoice import parse_invoice_visual
+        parsed = parse_invoice_visual(pdf_path, payload.get("pages", []), filename, language,
+                                      mode="auto")
+    else:
+        parsed = parse_invoice_hybrid(payload.get("pages", []), filename, language, mode="fast")
     if details is not None:
         details.update(parsed)
     data, quality = parsed["data"], parsed["quality"]
@@ -75,7 +83,7 @@ def extract_result(payload, filename, language="eng+ara", *, pdf_path=None, mode
         notes.append("Check extracted values against the PDF.")
     return {
         "source_filename": filename,
-        "extraction_mode": "paddleocr",
+        "extraction_mode": mode,
         "status": "needs_review" if needs_review else "extracted",
         "invoice_number": data.get("invoice", {}).get("invoice_number"),
         "invoice_date": data.get("invoice", {}).get("date"),
@@ -108,7 +116,7 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--filename", default="invoice.pdf")
     parser.add_argument("--language", default="eng+ara")
-    parser.add_argument('--mode', default='fast', help='Deprecated; PaddleOCR is always used.')
+    parser.add_argument('--mode', choices=('fast', 'auto'), default='fast')
     parser.add_argument('--pdf',type=Path)
     parser.add_argument('--details-output',type=Path)
     args = parser.parse_args()

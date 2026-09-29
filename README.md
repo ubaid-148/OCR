@@ -1,7 +1,8 @@
 # Local PaddleOCR Invoice Extraction
 
 This project extracts text and structured invoice fields from PDF files using
-local PaddleOCR. It does not send PDFs to Gemini, Azure, or any other cloud
+local PaddleOCR. In Accuracy mode, an on-device Ollama/Qwen vision model checks
+the original invoice image; no PDFs are sent to Gemini, Azure, or another cloud
 OCR provider.
 
 ## Requirements
@@ -9,6 +10,7 @@ OCR provider.
 - Python 3.11+
 - PaddleOCR and PaddlePaddle (installed from `requirements.txt`)
 - Tesseract OCR available on `PATH` for the OCRmyPDF utility path
+- Google Colab Accuracy mode also installs Ollama and `qwen3-vl:4b` locally
 
 ## Setup
 
