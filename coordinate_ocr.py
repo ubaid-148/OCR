@@ -210,10 +210,12 @@ def _extract_pdf(input_path, languages, paddle_language, model, progress=lambda 
         for number, page in enumerate(document, start=1):
             progress(f'Reading page {number} of {len(document)}')
             pdf_rotation = int(page.get_rotation() or 0)
+            native_started = perf_counter()
             try:
                 native = extract_native_words(page) if os.environ.get("OCR_FORCE_RASTER", "false").lower() not in {"true", "1"} else []
             except Exception:
                 native = []  # Unusable text layer: rasterize this page.
+            native_seconds = perf_counter() - native_started
             if native:
                 pages.append(dict(page=number, render_dpi=render_dpi,
                                   width=page.get_width(), height=page.get_height(),
@@ -223,24 +225,37 @@ def _extract_pdf(input_path, languages, paddle_language, model, progress=lambda 
                                   rotation_confidence=None, rotation_source="native_text_matrix",
                                   rotation_status="upright",
                                   extraction_method="native_text", words=native,
-                                  text="\n".join(w["text"] for w in native)))
+                                  text="\n".join(w["text"] for w in native),
+                                  timings_seconds={"native_text": round(native_seconds, 3),
+                                                   "render": 0.0, "image_save": 0.0,
+                                                   "orientation": 0.0, "paddle_inference": 0.0}))
                 page.close()
                 continue
             image_path = temp_root / f"page-{number}.png"
+            render_started = perf_counter()
             raw_image = render_upright_page(page, render_dpi, 0)
+            render_seconds = perf_counter() - render_started
+            save_started = perf_counter()
             raw_image.save(image_path)
+            image_save_seconds = perf_counter() - save_started
+            orientation_started = perf_counter()
             decision = orient(image_path) if orient else dict(
                 rotation_degrees=0, rotation_confidence=None,
                 rotation_source="orientation_unavailable", rotation_status="failed")
+            page_orientation_seconds = perf_counter() - orientation_started
             correction = decision["rotation_degrees"]
             upright_image = rotate_image(raw_image, correction)
+            save_started = perf_counter()
             upright_image.save(image_path)
+            image_save_seconds += perf_counter() - save_started
             progress(f"Page {number} orientation: {correction}° ({decision['rotation_status']})")
             words = []
             predictor = model()
             progress(f'Recognizing page {number} of {len(document)}')
+            inference_started = perf_counter()
             for prediction in predictor.predict(str(image_path)):
                 words.extend(extract_words(prediction))
+            inference_seconds = perf_counter() - inference_started
             page_payload = {
                 "page": number, "render_dpi": render_dpi,
                 "extraction_method": "ocr",
@@ -251,6 +266,11 @@ def _extract_pdf(input_path, languages, paddle_language, model, progress=lambda 
                 **decision,
                 "words": words,
                 "text": "\n".join(item["text"] for item in words),
+                "timings_seconds": {"native_text": round(native_seconds, 3),
+                                    "render": round(render_seconds, 3),
+                                    "image_save": round(image_save_seconds, 3),
+                                    "orientation": round(page_orientation_seconds, 3),
+                                    "paddle_inference": round(inference_seconds, 3)},
             }
             page_payload['receipt_region']=receipt_region(words,upright_image.width,upright_image.height)
             page_payload['base_words']=[dict(word) for word in words]

@@ -89,6 +89,31 @@ class VisionScopeError(ValueError):
         self.page_number = page_number
 
 
+def _parse_vision_json(content: Any) -> dict[str, Any]:
+    """Parse a model object without accepting a guessed/partially repaired result.
+
+    Ollama's JSON schema mode normally returns an object.  A few model versions
+    still wrap it in a markdown fence; removing that wrapper is deterministic.
+    We deliberately do not try to invent missing braces, values, or rows.
+    """
+    if isinstance(content, dict):
+        return content
+    if not isinstance(content, str):
+        raise ValueError("Vision response did not contain JSON text")
+    value = content.strip()
+    if value.startswith("```json") and value.endswith("```"):
+        value = value[7:-3].strip()
+    elif value.startswith("```") and value.endswith("```"):
+        value = value[3:-3].strip()
+    decoder = json.JSONDecoder()
+    parsed, end = decoder.raw_decode(value)
+    if value[end:].strip():
+        raise ValueError("Vision response has non-JSON trailing content")
+    if not isinstance(parsed, dict):
+        raise ValueError("Vision response was not a JSON object")
+    return parsed
+
+
 def _text(value):
     return str(value).strip() if value is not None and str(value).strip() else None
 
@@ -246,6 +271,10 @@ def _record_ollama_metrics(record: dict[str, Any], response: dict[str, Any]) -> 
 def _scope_budget(scope):
     if scope == "header":
         return int(os.environ.get("OLLAMA_HEADER_NUM_PREDICT", "2048"))
+    if scope == "full":
+        # One image encoding and one generation is substantially cheaper than
+        # the old header + table calls on local vision models.
+        return int(os.environ.get("OLLAMA_FULL_NUM_PREDICT", "3584"))
     return int(os.environ.get("OLLAMA_NUM_PREDICT", "1536"))
 
 
@@ -263,7 +292,20 @@ def vision_attempt_summary(records):
 def _ask_scope(images: list[str], page_number: int, page_count: int,
                scope: str, diagnostics: list[dict[str, Any]] | None = None, *,
                instruction: str = "", max_output_tokens: int | None = None, attempt: int = 1) -> dict[str, Any]:
-    if scope == "header":
+    if scope == "full":
+        schema = FULL_SCHEMA
+        scope_images = images
+        prompt = (
+            f"Read ORIGINAL invoice page {page_number} of {page_count}. Extract the invoice header, "
+            "seller, buyer, dates/number/payment, VAT summary, totals, labelled fields and every item-table "
+            "row in top-to-bottom printed order. Image 1 is the full page; any additional image is a sharper "
+            "crop of the same table, not another document. Keep Arabic and English exactly as printed. Keep "
+            "table columns separate: description, SKU, quantity, unit, unit price, discount, taxable amount, "
+            "VAT amount/rate and gross amount. Do not include totals/footer as rows. Some invoices print taxable "
+            "and VAT per unit but gross as an extended total: transcribe printed values without recalculation. "
+            "Use ISO YYYY-MM-DD only for unambiguous Gregorian dates. Return compact JSON only."
+        )
+    elif scope == "header":
         schema = HEADER_SCHEMA
         scope_images = images[:1]
         prompt = (
@@ -311,7 +353,12 @@ def _ask_scope(images: list[str], page_number: int, page_count: int,
     record = {"page": page_number, "scope": scope, "model": model,
               "image_count": len(scope_images), "status": "failed", "attempt": attempt, "is_retry": attempt > 1,
               "max_output_tokens": predict_limit, "focused_reread": bool(instruction),
-              "image_processing_seconds": None}
+              "image_processing_seconds": None,
+              # The base64 is already rendered once locally.  These values make
+              # repeated server-side vision encoding visible in real benchmarks.
+              "image_payload_bytes": sum(len(image) * 3 // 4 for image in scope_images),
+              "prompt_characters": len(prompt),
+              "response_characters": None, "json_parse_seconds": None}
     _record_ollama_metrics(record, {})
     if diagnostics is not None:
         diagnostics.append(record)
@@ -322,16 +369,20 @@ def _ask_scope(images: list[str], page_number: int, page_count: int,
         response = request_json(os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434/api/chat"),
                                 body, timeout=timeout)
         _record_ollama_metrics(record, response)
+        content = response.get("message", {}).get("content")
+        record["response_characters"] = len(content) if isinstance(content, str) else None
         if response.get("error"):
             raise ValueError(f"Ollama {scope} error: {response['error']}")
         if response.get("done") is False or response.get("done_reason") == "length":
             raise VisionTruncatedError(f"Vision {scope} output for page {page_number} was truncated "
                              f"(generated {response.get('eval_count', '?')} / {predict_limit} tokens)")
-        content = response.get("message", {}).get("content")
-        parsed = json.loads(content) if isinstance(content, str) else content
-        if not isinstance(parsed, dict):
-            raise ValueError(f"Vision {scope} output for page {page_number} was not an object")
-        if scope == "items" and not isinstance(parsed.get("items"), list):
+        try:
+            parsed = _parse_vision_json(content)
+        finally:
+            # Parsing a response this small is deterministic and normally below
+            # timer resolution; keep the field for a uniform timing contract.
+            record["json_parse_seconds"] = 0.0
+        if scope in {"items", "full"} and not isinstance(parsed.get("items"), list):
             raise ValueError(f"Vision item response for page {page_number} omitted the items array")
         record["status"] = "completed"
         return parsed
@@ -340,7 +391,7 @@ def _ask_scope(images: list[str], page_number: int, page_count: int,
 
 
 def _ask_with_retry(images, page_number, page_count, scope, diagnostics=None, **kwargs):
-    """Retry truncated generation once; never accept a partial JSON table."""
+    """Retry only the failed scope once; never repeat the complete document."""
     try:
         return _ask_scope(images, page_number, page_count, scope, diagnostics=diagnostics, **kwargs)
     except VisionTruncatedError:
@@ -350,16 +401,41 @@ def _ask_with_retry(images, page_number, page_count, scope, diagnostics=None, **
         if expanded <= initial:
             raise
         if diagnostics:
-            diagnostics[-1]["retried"] = True
+            diagnostics[-1].update(retried=True, retry_reason="output_truncated",
+                                   previous_response_characters=diagnostics[-1].get("response_characters"))
         kwargs = dict(kwargs, max_output_tokens=expanded, attempt=2)
+        return _ask_scope(images, page_number, page_count, scope, diagnostics=diagnostics, **kwargs)
+    except (json.JSONDecodeError, ValueError) as error:
+        # Safe fence removal/raw decoding was attempted in _parse_vision_json.
+        # A retry asks only this scope for compact JSON, rather than rerendering
+        # or re-running header + table work.  Invalid semantic responses are not
+        # retried: only JSON-shape failures qualify.
+        message = str(error).lower()
+        json_failure = "json" in message or "trailing content" in message or "did not contain" in message
+        if not json_failure or kwargs.get("attempt", 1) >= 2:
+            raise
+        if diagnostics:
+            diagnostics[-1].update(retried=True, retry_reason="invalid_json",
+                                   previous_response_characters=diagnostics[-1].get("response_characters"))
+        retry_instruction = (kwargs.get("instruction", "") +
+                             " Return one compact JSON object only; do not use markdown fences or commentary.").strip()
+        kwargs = dict(kwargs, instruction=retry_instruction, attempt=2)
         return _ask_scope(images, page_number, page_count, scope, diagnostics=diagnostics, **kwargs)
 
 
 def ask_visual(images: list[str] | str, page_number: int, page_count: int,
                progress: Callable[[str], None] | None = None,
-               diagnostics: list[dict[str, Any]] | None = None, *, include_items: bool = True) -> dict[str, Any]:
+               diagnostics: list[dict[str, Any]] | None = None, *, include_items: bool = True,
+               single_pass: bool = False) -> dict[str, Any]:
     """Read headers first; skip table vision when spatial OCR already verifies it."""
     images = [images] if isinstance(images, str) else images
+    if include_items and single_pass:
+        if progress:
+            progress(f"Reading page {page_number}/{page_count}: invoice and item table")
+        started = perf_counter()
+        result = _ask_with_retry(images, page_number, page_count, "full", diagnostics=diagnostics)
+        result["_vision_timings"] = {"visual_header": 0, "visual_items": perf_counter() - started}
+        return result
     if progress:
         progress(f"Reading page {page_number}/{page_count}: header and totals")
     header_started = perf_counter()
@@ -615,7 +691,10 @@ def _parse_invoice_visual(pdf_path: str | Path, pages: list[dict[str, Any]],
             ai_started = perf_counter()
             try:
                 raw = ask_visual(images, number, count, progress=progress, diagnostics=diagnostics,
-                                 include_items=item_table_needs_vision)
+                                 include_items=item_table_needs_vision,
+                                 single_pass=(item_table_needs_vision and
+                                              os.environ.get("VISION_COMBINED_PASS", "false").lower()
+                                              not in {"false", "0", "no"}))
                 if os.environ.get("VISION_RECOVERY", "false").lower() not in {"false", "0", "no"} and Path(pdf_path).is_file():
                     from visual_recovery import recover_page
                     ocr_page = next((p for i,p in enumerate(pages, 1) if p.get("page", i) == number), {})
