@@ -13,7 +13,16 @@ def _tags():
         return json.load(response)
 
 
-def prepare_vision_runtime(model='qwen3-vl:4b-instruct'):
+def prepare_vision_runtime(model=None):
+    from visual_invoice import DEFAULT_VISION_MODEL
+    if model:
+        model_source = 'argument'
+    elif os.environ.get('OLLAMA_MODEL'):
+        model = os.environ['OLLAMA_MODEL']
+        model_source = 'OLLAMA_MODEL'
+    else:
+        model = DEFAULT_VISION_MODEL
+        model_source = 'default'
     if not Path('/content').is_dir():
         raise RuntimeError('Vision setup is intended for Google Colab.')
     os.environ['USE_LOCAL_AI']='false'
@@ -48,7 +57,10 @@ def prepare_vision_runtime(model='qwen3-vl:4b-instruct'):
     if 'vision' not in info.get('capabilities',[]):
         raise RuntimeError('Selected model does not support invoice images.')
     os.environ.update(USE_LOCAL_AI='true',OLLAMA_MODEL=model,
+                      OLLAMA_MODEL_SOURCE=model_source,
                       OLLAMA_URL='http://127.0.0.1:11434/api/chat')
     os.environ.setdefault('OLLAMA_TIMEOUT_SECONDS','300')
+    print('Vision model resolved:',model,flush=True)
+    print('Vision model source:',model_source,flush=True)
     print('General layout extraction ready: OCR + local vision ('+model+').',flush=True)
     return model

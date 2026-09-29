@@ -37,6 +37,14 @@ BANK_FIELDS = ("beneficiary", "bank_name", "account_no", "branch", "iban")
 DEFAULT_VISION_MODEL = "qwen3-vl:4b-instruct"
 
 
+def resolved_vision_model() -> tuple[str, str]:
+    """Return the effective model and whether it was explicitly configured."""
+    configured = os.environ.get("OLLAMA_MODEL")
+    if configured:
+        return configured, os.environ.get("OLLAMA_MODEL_SOURCE", "OLLAMA_MODEL")
+    return DEFAULT_VISION_MODEL, "default"
+
+
 def _object_schema(text_fields=(), number_fields=()):
     properties = {key: {"type": ["string", "null"]} for key in text_fields}
     properties.update({key: {"type": ["number", "null"]} for key in number_fields})
@@ -349,7 +357,7 @@ def _ask_scope(images: list[str], page_number: int, page_count: int,
     # stateless request as well; it does not remove any invoice fields.
     if not thinking_requested:
         prompt += " /no_think"
-    model = os.environ.get("OLLAMA_MODEL", DEFAULT_VISION_MODEL)
+    model, model_source = resolved_vision_model()
     predict_limit = max_output_tokens or _scope_budget(scope)
     body = {
         "model": model, "stream": False, "format": schema, "keep_alive": "30m",
@@ -361,7 +369,7 @@ def _ask_scope(images: list[str], page_number: int, page_count: int,
                     "num_predict": predict_limit},
         "messages": [{"role": "user", "content": prompt, "images": scope_images}],
     }
-    record = {"page": page_number, "scope": scope, "model": model,
+    record = {"page": page_number, "scope": scope, "model": model, "model_source": model_source,
               "image_count": len(scope_images), "status": "failed", "attempt": attempt, "is_retry": attempt > 1,
               "max_output_tokens": predict_limit, "focused_reread": bool(instruction),
               "image_processing_seconds": None,
@@ -690,6 +698,9 @@ def _parse_invoice_visual(pdf_path: str | Path, pages: list[dict[str, Any]],
         return fallback
     diagnostics: list[dict[str, Any]] = []
     fallback["vision_diagnostics"] = diagnostics
+    model, model_source = resolved_vision_model()
+    print(f"Vision model resolved: {model}", flush=True)
+    print(f"Vision model source: {model_source}", flush=True)
     try:
         parts = []
         page_errors = []
@@ -763,7 +774,7 @@ def _parse_invoice_visual(pdf_path: str | Path, pages: list[dict[str, Any]],
         issues, evidence = audit_ai(data, pages, enforce_items=True)
         validation, quality = _validate(data)
         quality.update(parser="visual_ai",
-                       model=os.environ.get("OLLAMA_MODEL", DEFAULT_VISION_MODEL),
+                       model=model,
                        local_ai_status="vision_evidence_reviewed", evidence_issues=issues,
                        field_evidence=evidence, review_reasons=conflicts + reconciliation_notes,
                        visual_pages=len(parts))

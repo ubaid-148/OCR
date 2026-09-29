@@ -42,8 +42,17 @@ class GeneralExtractionTests(unittest.TestCase):
              patch('colab_vision.subprocess.run') as run:
             self.assertEqual(prepare_vision_runtime(),'qwen3-vl:4b-instruct')
             self.assertEqual(os.environ['USE_LOCAL_AI'],'true')
+            self.assertEqual(os.environ['OLLAMA_MODEL_SOURCE'],'default')
             run.assert_not_called()
 
+    def test_explicit_ollama_model_remains_an_override(self):
+        with patch.dict(os.environ, {'OLLAMA_MODEL':'qwen3-vl:4b'}, clear=True), \
+             patch('colab_vision.Path.is_dir',return_value=True), \
+             patch('colab_vision.shutil.which',return_value='/usr/bin/ollama'), \
+             patch('colab_vision._tags',return_value={'models':[{'name':'qwen3-vl:4b'}]}), \
+             patch('ollama_http.request_json',return_value={'capabilities':['vision']}):
+            self.assertEqual(prepare_vision_runtime(),'qwen3-vl:4b')
+            self.assertEqual(os.environ['OLLAMA_MODEL_SOURCE'],'OLLAMA_MODEL')
     def test_text_only_model_does_not_enable_general_mode(self):
         with patch.dict(os.environ,{},clear=True), \
              patch('colab_vision.Path.is_dir',return_value=True), \
