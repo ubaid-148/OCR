@@ -37,10 +37,10 @@ class GeneralExtractionTests(unittest.TestCase):
         with patch.dict(os.environ,{},clear=True), \
              patch('colab_vision.Path.is_dir',return_value=True), \
              patch('colab_vision.shutil.which',return_value='/usr/bin/ollama'), \
-             patch('colab_vision._tags',return_value={'models':[{'name':'qwen3-vl:4b'}]}), \
+             patch('colab_vision._tags',return_value={'models':[{'name':'qwen3-vl:4b-instruct'}]}), \
              patch('ollama_http.request_json',return_value={'capabilities':['vision']}), \
              patch('colab_vision.subprocess.run') as run:
-            self.assertEqual(prepare_vision_runtime(),'qwen3-vl:4b')
+            self.assertEqual(prepare_vision_runtime(),'qwen3-vl:4b-instruct')
             self.assertEqual(os.environ['USE_LOCAL_AI'],'true')
             run.assert_not_called()
 

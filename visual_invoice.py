@@ -34,6 +34,7 @@ ITEM_NUMBERS = ("quantity", "unit_price", "discount", "amount", "tax_rate", "vat
 TOTAL_NUMBERS = ("subtotal", "discount", "other_charges", "taxable_amount", "vat_rate", "vat_amount", "net_amount")
 VAT_NUMBERS = ("before_tax", "tax_amount", "inc_tax")
 BANK_FIELDS = ("beneficiary", "bank_name", "account_no", "branch", "iban")
+DEFAULT_VISION_MODEL = "qwen3-vl:4b-instruct"
 
 
 def _object_schema(text_fields=(), number_fields=()):
@@ -348,7 +349,7 @@ def _ask_scope(images: list[str], page_number: int, page_count: int,
     # stateless request as well; it does not remove any invoice fields.
     if not thinking_requested:
         prompt += " /no_think"
-    model = os.environ.get("OLLAMA_MODEL", "qwen3-vl:4b")
+    model = os.environ.get("OLLAMA_MODEL", DEFAULT_VISION_MODEL)
     predict_limit = max_output_tokens or _scope_budget(scope)
     body = {
         "model": model, "stream": False, "format": schema, "keep_alive": "30m",
@@ -762,7 +763,7 @@ def _parse_invoice_visual(pdf_path: str | Path, pages: list[dict[str, Any]],
         issues, evidence = audit_ai(data, pages, enforce_items=True)
         validation, quality = _validate(data)
         quality.update(parser="visual_ai",
-                       model=os.environ.get("OLLAMA_MODEL", "qwen3-vl:4b"),
+                       model=os.environ.get("OLLAMA_MODEL", DEFAULT_VISION_MODEL),
                        local_ai_status="vision_evidence_reviewed", evidence_issues=issues,
                        field_evidence=evidence, review_reasons=conflicts + reconciliation_notes,
                        visual_pages=len(parts))

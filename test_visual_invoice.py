@@ -96,7 +96,7 @@ class VisualInvoiceTests(unittest.TestCase):
         self.assertNotIn("items", header["format"]["properties"])
         self.assertNotIn("required", header["format"]["properties"]["supplier"])
         self.assertEqual(list(items["format"]["properties"]), ["items"])
-        self.assertEqual(items["model"], "qwen3-vl:4b")
+        self.assertEqual(items["model"], "qwen3-vl:4b-instruct")
 
     def test_scope_metrics_convert_nanoseconds_and_keep_missing_values_unknown(self):
         diagnostics = []

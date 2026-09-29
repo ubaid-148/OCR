@@ -13,7 +13,7 @@ def _tags():
         return json.load(response)
 
 
-def prepare_vision_runtime(model='qwen3-vl:4b'):
+def prepare_vision_runtime(model='qwen3-vl:4b-instruct'):
     if not Path('/content').is_dir():
         raise RuntimeError('Vision setup is intended for Google Colab.')
     os.environ['USE_LOCAL_AI']='false'
