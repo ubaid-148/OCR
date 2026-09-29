@@ -119,6 +119,12 @@ class ColabUploadTests(unittest.TestCase):
             self.assertEqual(len(downloads), 1)
             self.assertIn('preparing it now', output)
 
+    def test_upload_cell_reloads_vision_bootstrap_before_initialization(self):
+        source = self.source()
+        reload_at = source.index('importlib.reload(colab_vision)')
+        prepare_at = source.index('colab_vision.prepare_vision_runtime()')
+        self.assertLess(reload_at, prepare_at)
+
 
 if __name__ == '__main__':
     unittest.main()
