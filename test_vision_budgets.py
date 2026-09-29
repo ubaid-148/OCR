@@ -22,6 +22,8 @@ class VisionBudgetTests(unittest.TestCase):
         with patch.dict(os.environ, {}, clear=True), patch('visual_invoice.request_json', side_effect=respond) as request:
             ask_visual('IMAGE', 1, 1)
         self.assertTrue(all(call.args[1]['think'] is False for call in request.call_args_list))
+        self.assertTrue(all(call.args[1]['messages'][0]['content'].endswith('/no_think')
+                            for call in request.call_args_list))
 
     def test_header_at_ceiling_does_not_repeat_truncated_call(self):
         diagnostics=[]
