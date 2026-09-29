@@ -698,7 +698,10 @@ def parse_layout(pages,filename,language):
         if target:
             supply_date=keep('invoice.date_of_supply',target,re.search(pattern,normalize(target['text']))[0])
             break
-    buyer_candidates=[w for w in words if contains(w['text'],CUSTOMER_SECTION_LABELS)
+    # Arabic OCR may join the customer label to the company name, producing a
+    # single token that generic word-boundary matching cannot recognize.
+    buyer_candidates=[w for w in words if (contains(w['text'],CUSTOMER_SECTION_LABELS) or
+                      '\u0627\u0644\u0639\u0645\u064a\u0644' in normalize(w['text']).replace(' ',''))
                       and not contains(w['text'],('signature','seal','company','trading','est','establishment','vat','tax','الضربي','الضريبي','ختم','توقيع'))]
     def buyer_rank(w):
         if contains(w['text'],CUSTOMER_NAME_LABELS):return 0

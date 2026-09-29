@@ -16,6 +16,13 @@ class VisionBudgetTests(unittest.TestCase):
         self.assertEqual([d['status'] for d in diagnostics],['completed','completed'])
         self.assertEqual(vision_attempt_summary(diagnostics)['retry_attempt_count'],0)
 
+    def test_direct_json_mode_disables_qwen_thinking_by_default(self):
+        def respond(url, body, **kwargs):
+            return {'done': True, 'message': {'content': '{}'}} if 'items' not in body['format']['properties'] else {'done': True, 'message': {'content': '{"items":[]}'}}
+        with patch.dict(os.environ, {}, clear=True), patch('visual_invoice.request_json', side_effect=respond) as request:
+            ask_visual('IMAGE', 1, 1)
+        self.assertTrue(all(call.args[1]['think'] is False for call in request.call_args_list))
+
     def test_header_at_ceiling_does_not_repeat_truncated_call(self):
         diagnostics=[]
         with patch.dict(os.environ,{'OLLAMA_HEADER_NUM_PREDICT':'8192'},clear=True), patch('visual_invoice.request_json',return_value={'done_reason':'length'}) as request:

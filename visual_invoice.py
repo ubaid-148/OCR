@@ -346,6 +346,10 @@ def _ask_scope(images: list[str], page_number: int, page_count: int,
     predict_limit = max_output_tokens or _scope_budget(scope)
     body = {
         "model": model, "stream": False, "format": schema, "keep_alive": "30m",
+        # qwen3-vl can spend thousands of generated tokens in hidden thinking
+        # before emitting a small JSON object. Extraction is evidence-gated
+        # afterwards, so request direct structured transcription by default.
+        "think": os.environ.get("OLLAMA_THINK", "false").lower() not in {"false", "0", "no"},
         "options": {"temperature": 0, "num_ctx": int(os.environ.get("OLLAMA_NUM_CTX", "16384")),
                     "num_predict": predict_limit},
         "messages": [{"role": "user", "content": prompt, "images": scope_images}],
@@ -358,7 +362,8 @@ def _ask_scope(images: list[str], page_number: int, page_count: int,
               # repeated server-side vision encoding visible in real benchmarks.
               "image_payload_bytes": sum(len(image) * 3 // 4 for image in scope_images),
               "prompt_characters": len(prompt),
-              "response_characters": None, "json_parse_seconds": None}
+              "response_characters": None, "thinking_characters": None,
+              "json_parse_seconds": None}
     _record_ollama_metrics(record, {})
     if diagnostics is not None:
         diagnostics.append(record)
@@ -371,6 +376,8 @@ def _ask_scope(images: list[str], page_number: int, page_count: int,
         _record_ollama_metrics(record, response)
         content = response.get("message", {}).get("content")
         record["response_characters"] = len(content) if isinstance(content, str) else None
+        thinking = response.get("message", {}).get("thinking")
+        record["thinking_characters"] = len(thinking) if isinstance(thinking, str) else None
         if response.get("error"):
             raise ValueError(f"Ollama {scope} error: {response['error']}")
         if response.get("done") is False or response.get("done_reason") == "length":

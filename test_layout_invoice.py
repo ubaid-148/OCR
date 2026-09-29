@@ -11,6 +11,15 @@ def box(text, x, y, scale=1):
 
 
 class LayoutInvoiceTests(unittest.TestCase):
+    def test_joined_arabic_customer_label_keeps_name_and_tax_code_roles(self):
+        import json
+        from pathlib import Path
+        fixture = Path(__file__).parent / 'tests' / 'fixtures' / '9522_ocr.json'
+        source = json.loads(fixture.read_text(encoding='utf-8'))
+        result = parse_layout(source['pages'], '9522.pdf', 'eng+ara')
+        self.assertEqual(result['customer']['name'], 'مؤسسة على محمد ال ريح للمقاولات العامة')
+        self.assertEqual(result['customer']['vat_number'], '300402905100003')
+
     def test_full_customer_crop_beats_short_confident_fragment(self):
         words=self.summary_page()+[box('Customer',1000,100)]
         for text,x,confidence in [('مؤسسة على',800,99),('مؤسسة علي محمد للمقاولات العامة',500,90)]:
