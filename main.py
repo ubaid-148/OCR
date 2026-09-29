@@ -12,7 +12,6 @@ from pdf_fallback import cross_check
 from table_extractor import extract_table
 from validator import validate
 from canonical_schema import to_canonical
-from llm_extractor import extract_with_ollama
 from bbox_grouping import box_geometry
 from layout_invoice import parse_layout
 from local_ai_parser import parse_invoice_hybrid
@@ -216,20 +215,11 @@ def main() -> int:
     parser.add_argument("input", type=Path)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--pdf", type=Path, help="Optional source PDF for low-confidence cross-checks")
-    parser.add_argument("--model", help="Optional local Ollama model name")
-    parser.add_argument("--no-llm", action="store_true", help="Use rules-only extraction")
     parser.add_argument("--debug-dir", type=Path, help="Write intermediate OCR/draft files here")
     args = parser.parse_args()
     payload = json.loads(args.input.read_text(encoding="utf-8"))
     rule_based = build_document(payload, str(args.pdf) if args.pdf else None)
-    warnings = []
-    llm_draft = None
-    if args.model and not args.no_llm:
-        try:
-            llm_draft = to_canonical(extract_with_ollama(payload, args.model))
-        except (RuntimeError, ValueError, json.JSONDecodeError) as error:
-            warnings.append(f"llm_unavailable: extraction used rule-based pipeline only ({error})")
-    result = to_canonical(merge_drafts(rule_based, llm_draft, warnings))
+    result = to_canonical(merge_drafts(rule_based, None, []))
     canonical_warnings = list(result.get("validation", {}).get("warnings", []))
     arithmetic_validation = validate(result)
     result["validation"] = arithmetic_validation
@@ -238,17 +228,14 @@ def main() -> int:
     arithmetic_warnings = [str(warning) for warning in arithmetic_validation["warnings"]]
     result["validation"]["warnings"] = list(dict.fromkeys(canonical_warnings + arithmetic_warnings))
     result["validation"]["passed"] = not result["validation"]["warnings"]
-    if warnings:
-        result["validation"]["warnings"] = list(dict.fromkeys(warnings + result["validation"].get("warnings", [])))
-        result["validation"]["passed"] = False
     _assert_clean_schema(result)
     if args.debug_dir:
         args.debug_dir.mkdir(parents=True, exist_ok=True)
         (args.debug_dir / "raw_ocr.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         (args.debug_dir / "rule_based_draft.json").write_text(json.dumps(rule_based, ensure_ascii=False, indent=2), encoding="utf-8")
-        (args.debug_dir / "llm_draft.json").write_text(json.dumps(llm_draft, ensure_ascii=False, indent=2), encoding="utf-8")
     args.output.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(json.dumps(result, ensure_ascii=False, indent=2))
+    # Windows consoles may use a legacy code page; the saved JSON remains UTF-8.
+    print(json.dumps(result, ensure_ascii=True, indent=2))
     return 0
 
 

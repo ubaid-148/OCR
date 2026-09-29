@@ -7,23 +7,21 @@ from pathlib import Path
 from time import perf_counter
 
 from local_ai_parser import parse_invoice_hybrid
-from visual_invoice import TEXT_FIELDS, ITEM_TEXT, ITEM_NUMBERS, TOTAL_NUMBERS, VAT_NUMBERS
+TEXT_FIELDS = {
+    "supplier": ("name_ar", "name_en", "branch", "vat_number", "cr_number", "building_no", "street", "area", "post_code", "additional_no", "short_address", "country", "city", "address", "business_type"),
+    "invoice": ("invoice_number", "date", "date_of_supply", "hijri_date", "time", "ref_no", "payment_method", "page"),
+    "customer": ("customer_code", "name", "name_ar", "name_en", "vat_number", "cr_number", "building_no", "street", "area", "post_code", "additional_no", "short_address", "country", "city", "address"),
+}
+ITEM_TEXT = ("item_code", "description", "description_ar", "description_en", "unit", "tax_code")
+ITEM_NUMBERS = ("quantity", "unit_price", "discount", "amount", "tax_rate", "vat_amount", "gross_amount")
+TOTAL_NUMBERS = ("subtotal", "discount", "other_charges", "taxable_amount", "vat_rate", "vat_amount", "net_amount")
+VAT_NUMBERS = ("before_tax", "tax_amount", "inc_tax")
 
 
 def extract_result(payload, filename, language="eng+ara", *, pdf_path=None, mode="fast", details=None):
     started = perf_counter()
-    if mode not in {'fast','auto'}:
-        raise ValueError('Extraction mode must be fast or auto')
-    if mode=='auto':
-        if pdf_path is None:
-            raise ValueError('General layout extraction requires the original PDF')
-        import os
-        if os.environ.get('USE_LOCAL_AI','true').lower() in {'false','0','no'}:
-            raise RuntimeError('General layout extraction requires vision setup. Rerun Prepare OCR.')
-        from visual_invoice import parse_invoice_visual
-        parsed=parse_invoice_visual(pdf_path,payload.get('pages',[]),filename,language,mode='auto')
-    else:
-        parsed = parse_invoice_hybrid(payload.get("pages", []), filename, language, mode="fast")
+    # Older Colab notebooks may still send "auto"; extraction is PaddleOCR-only.
+    parsed = parse_invoice_hybrid(payload.get("pages", []), filename, language, mode="fast")
     if details is not None:
         details.update(parsed)
     data, quality = parsed["data"], parsed["quality"]
@@ -77,7 +75,7 @@ def extract_result(payload, filename, language="eng+ara", *, pdf_path=None, mode
         notes.append("Check extracted values against the PDF.")
     return {
         "source_filename": filename,
-        "extraction_mode": mode,
+        "extraction_mode": "paddleocr",
         "status": "needs_review" if needs_review else "extracted",
         "invoice_number": data.get("invoice", {}).get("invoice_number"),
         "invoice_date": data.get("invoice", {}).get("date"),
@@ -96,8 +94,6 @@ def extract_result(payload, filename, language="eng+ara", *, pdf_path=None, mode
         "handwritten_notes": data.get("handwritten_notes", []),
         "other_fields": data.get("other_fields", []),
         "bank_details": data.get("bank_details"),
-        "field_sources": sources,
-        "unassigned_ocr": unassigned,
         "missing_fields": list(dict.fromkeys(missing)),
         "timings_seconds": {"ocr": payload.get("timings_seconds", {}),
                             "extraction": round(perf_counter() - started, 3),
@@ -112,7 +108,7 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--filename", default="invoice.pdf")
     parser.add_argument("--language", default="eng+ara")
-    parser.add_argument('--mode',choices=('fast','auto'),default='fast')
+    parser.add_argument('--mode', default='fast', help='Deprecated; PaddleOCR is always used.')
     parser.add_argument('--pdf',type=Path)
     parser.add_argument('--details-output',type=Path)
     args = parser.parse_args()

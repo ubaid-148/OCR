@@ -39,10 +39,11 @@ class PerformanceFlowTests(unittest.TestCase):
         self.assertTrue(UPLOAD_SLOT.acquire(blocking=False))
         UPLOAD_SLOT.release()
 
-    def test_accuracy_default_and_progress_ui(self):
+    def test_paddle_only_form_and_progress_ui(self):
         body = page().decode()
-        self.assertLess(body.index('value="auto"'), body.index('value="fast"'))
         self.assertIn('<details class="advanced">', body)
         self.assertNotIn('<label>Output', body)
+        self.assertNotIn('name="mode"', body)
+        self.assertIn('PaddleOCR extraction', body)
         self.assertIn('/app.js', body)
         self.assertIn('aria-live="polite"', body)

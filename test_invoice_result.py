@@ -18,16 +18,18 @@ class InvoiceResultTests(unittest.TestCase):
         self.assertNotIn('invoice.invoice_number', parsed['quality']['missing_fields'])
         self.assertIn('invoice.date', parsed['quality']['missing_fields'])
 
-    def test_result_identifies_pdf_and_preserves_audited_box_locations(self):
+    def test_result_identifies_pdf_and_keeps_audited_locations_in_details(self):
         parsed = {'data': {}, 'quality': {'missing_fields': ['invoice.date']},
                   'mapping_coverage': {'records': [
                       dict(page=1, text='40', bbox=[10, 20, 30, 10], fields=['totals.subtotal']),
                       dict(page=2, text='40', bbox=[10, 20, 30, 10], fields=[])]}}
+        details = {}
         with patch('invoice_result.parse_invoice_hybrid', return_value=parsed):
-            result = extract_result({'pages': [], 'timings_seconds': {'model_load': 3}}, 'a.pdf')
+            result = extract_result({'pages': [], 'timings_seconds': {'model_load': 3}}, 'a.pdf', details=details)
         self.assertEqual(result['source_filename'], 'a.pdf')
-        self.assertEqual(result['field_sources']['totals.subtotal'][0]['page'], 1)
-        self.assertEqual(result['unassigned_ocr'][0]['page'], 2)
+        self.assertNotIn('field_sources', result)
+        self.assertNotIn('unassigned_ocr', result)
+        self.assertEqual(details['mapping_coverage']['records'][0]['page'], 1)
         self.assertEqual(result['missing_fields'], ['invoice.date'])
         self.assertEqual(result['timings_seconds']['ocr']['model_load'], 3)
 
