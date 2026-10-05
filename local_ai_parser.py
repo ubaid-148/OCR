@@ -126,6 +126,69 @@ def _result_score(result):
             -len(quality.get("evidence_issues", [])))
 
 
+def _merge_losing_draft(winner: dict[str, Any], loser: dict[str, Any]) -> None:
+    """Keep the winning draft's rows, but not at the cost of fields only the other read.
+
+    The drafts are chosen as a whole by item completeness; a draft that found more
+    rows can still lack the header names or item descriptions the other one read.
+    Only empty fields are filled, header sections only (totals are reconciled by
+    arithmetic elsewhere), and descriptions only for rows with the same unique code.
+    """
+    evidence = winner.setdefault("field_evidence", {})
+    other_evidence = loser.get("field_evidence") or {}
+    for section in ("supplier", "invoice", "customer"):
+        target, source = winner.setdefault(section, {}), loser.get(section) or {}
+        for key, value in source.items():
+            # The invoice number has its own label-ranked candidate selection.
+            if key == "invoice_number" or target.get(key) not in (None, "") or value in (None, ""):
+                continue
+            ev = other_evidence.get(f"{section}.{key}")
+            ev = ev[0] if isinstance(ev, list) and ev else ev
+            if isinstance(ev, dict) and ev.get("source") != "native_text" and \
+                    float(ev.get("confidence") or 0) < 85:
+                continue  # Do not borrow a weakly read value.
+            target[key] = value
+            if f"{section}.{key}" in other_evidence:
+                evidence[f"{section}.{key}"] = other_evidence[f"{section}.{key}"]
+    if not winner.get("vat_summary") and loser.get("vat_summary"):
+        winner["vat_summary"] = loser["vat_summary"]
+    codes: dict[str, list[dict[str, Any]]] = {}
+    for item in loser.get("items") or []:
+        if item.get("item_code"):
+            codes.setdefault(str(item["item_code"]), []).append(item)
+    for item in winner.get("items") or []:
+        matches = codes.get(str(item.get("item_code")), [])
+        if len(matches) != 1:
+            continue
+        other = matches[0]
+        own = item.setdefault("field_evidence", {})
+        for key in ("description", "description_ar", "description_en", "unit", "tax_rate"):
+            if item.get(key) in (None, "") and other.get(key) not in (None, ""):
+                item[key] = other[key]
+                if key in (other.get("field_evidence") or {}):
+                    own[key] = other["field_evidence"][key]
+        # The same value read by both drafts came from the same box: keep its evidence.
+        for key, value in (other.get("field_evidence") or {}).items():
+            if key not in own and item.get(key) is not None and item.get(key) == other.get(key):
+                own[key] = value
+
+
+def _drop_unreadable_item_numbers(result: dict[str, Any], minimum: float = 50) -> None:
+    """A number read at very low confidence (e.g. a tick mark as "67") is not evidence."""
+    quality = result["quality"]
+    for index, item in enumerate(result["data"].get("items") or []):
+        for key in ("quantity", "unit_price", "amount", "vat_amount", "gross_amount"):
+            ev = (item.get("field_evidence") or {}).get(key)
+            if not isinstance(ev, dict) or item.get(key) is None or ev.get("source") == "native_text":
+                continue
+            if float(ev.get("confidence") or 0) < minimum:
+                quality.update(needs_review=True, overall_status="needs_review")
+                quality.setdefault("review_reasons", []).append(
+                    f"items[{index}].{key}: OCR read {ev.get('text')!r} at confidence "
+                    f"{ev.get('confidence')}; value left empty. Read it from the PDF.")
+                item[key] = None
+
+
 def _parse_invoice_hybrid(pages: list[dict[str, Any]], source_filename: str, language: str, mode: str = "auto") -> dict[str, Any]:
     # Legacy geometry is single-page only; never mix coordinates across pages.
     fallback = parse_invoice(pages[:1], source_filename, language)
@@ -172,7 +235,11 @@ def _parse_invoice_hybrid(pages: list[dict[str, Any]], source_filename: str, lan
                 ". These may be attachments or unparsed continuation pages; check the source.")
         candidate = {"data": layout, "quality": quality}
         if _result_score(candidate) >= _result_score(fallback):
+            legacy = fallback
             fallback = candidate
+            _merge_losing_draft(layout, legacy["data"])
+    if layout is not None and fallback["data"] is not layout:
+        _merge_losing_draft(fallback["data"], layout)
     # The web app's Accuracy mode performs its own original-page vision pass.
     # This module supplies the deterministic spatial draft for both modes.
     fallback["quality"]["parser"] = "spatial_fast"
@@ -193,6 +260,7 @@ def parse_invoice_hybrid(pages, source_filename, language, mode='auto'):
         clean.append(dict(page,words=words,receipt_region=region))
         if region:receipts.append(dict(page=page.get('page',i+1),bbox=region))
     result=_parse_invoice_hybrid(clean,source_filename,language,mode)
+    _drop_unreadable_item_numbers(result)
     add_printed_details(result['data'],clean)
     for item in result['data'].get('items',[]):
         for key in ('vat_amount','discount','gross_amount','amount_source','printed_amount','printed_vat_amount'):
@@ -229,6 +297,12 @@ def parse_invoice_hybrid(pages, source_filename, language, mode='auto'):
         quality.setdefault('review_reasons',[]).append('Check names and item descriptions recovered by targeted OCR against the PDF.')
     from label_value_pairing import apply_invoice_number_candidates
     apply_invoice_number_candidates(result, pages)
+    from party_fields import apply_party_fields
+    apply_party_fields(result, clean)
+    from totals_reconcile import apply_totals_reconciliation
+    apply_totals_reconciliation(result, clean)
+    from amount_words import apply_amount_words
+    apply_amount_words(result, clean)
     # Header enrichment can recover fields after the initial validation. Do
     # not keep claiming that those recovered values are still missing.
     validation, refreshed = _validate(result['data'])
