@@ -9,7 +9,7 @@ def add_printed_details(data, pages):
     for page in pages:
         words=page.get('words',[])
         h,y=geometry(words)
-        def labeled(pattern, field, below=False, pool=None):
+        def labeled(pattern, field, below=False, pool=None, reach=5):
             pool=words if pool is None else pool
             for label in pool:
                 match=re.match(pattern,label['text'],re.I)
@@ -18,7 +18,7 @@ def add_printed_details(data, pages):
                 value=label
                 if not tail:
                     candidates=[w for w in pool if w is not label and
-                                ((abs(y(w)-y(label))<h*.65 and w['left']>label['left']+label['width'] and w['left']-label['left']-label['width']<h*5) or
+                                ((abs(y(w)-y(label))<h*.65 and w['left']>label['left']+label['width'] and w['left']-label['left']-label['width']<h*reach) or
                                  (below and 0<y(w)-y(label)<h*2 and abs(w['left']-label['left'])<h))]
                     value=min(candidates,key=lambda w:(abs(y(w)-y(label)),w['left']),default=None)
                     tail=value['text'].strip(' :') if value else ''
@@ -34,7 +34,7 @@ def add_printed_details(data, pages):
                 continue
             if contains(word['text'], ('customer', 'buyer', 'العميل')):
                 continue
-            match = re.search(r'(?i)\bC\.?\s*R\.?\s*[:：]?\s*(\d{10})(?!\d)', word['text'])
+            match = re.search(r'(?i)\bC\.?\s*R\.?\s*(?:No\.?)?\s*[:：]?\s*(\d{10})(?!\d)', word['text'])
             if match and (word.get('source') == 'native_text' or word.get('confidence', 0) >= 90):
                 party = data.setdefault('supplier', {})
                 if not party.get('cr_number') and not party.get('commercial_registration'):
@@ -42,6 +42,8 @@ def add_printed_details(data, pages):
                     evidence['supplier.cr_number'] = proof(dict(word, _page=page.get('page', 1)))
                 break
         address=labeled(r'^CUSTOMER ADDRESS\s*:?', 'customer.address', below=True)
+        if address and contains(address,('amount','total','number','المبلغ','الإجمالي','الاجمالي','رقم')):
+            evidence.pop('customer.address',None);address=None  # A neighbouring label, not an address.
         if address:data['customer']['address']=address
         business=next((w for w in words if re.match(r'(?i)^SALE ALL KINDS OF\b',w['text'])),None)
         if business:
@@ -53,9 +55,11 @@ def add_printed_details(data, pages):
         if bank_label:
             stop=min((y(w) for w in words if y(w)>y(bank_label) and contains(w['text'],('authorized signature','received by'))),default=float('inf'))
             pool=[w for w in words if y(bank_label)<y(w)<stop and w['left']<bank_label['left']+h*35]
-            bank={key:labeled(pattern,'bank_details.'+key,pool=pool) for key,pattern in [
-                ('beneficiary',r'^Beneficiary\s*:'),('bank_name',r'^Bank\s*:?(?=\s|$)'),
-                ('account_no',r'^A/c\s*No\.?\s*:?'),('branch',r'^Branch\s*:?'),('iban',r'^IBAN\s*:?')]}
+            # Bank tables print a wide label column; values sit further right.
+            bank={key:labeled(pattern,'bank_details.'+key,pool=pool,reach=10) for key,pattern in [
+                ('beneficiary',r'^(?:Beneficiary|Account\s*Name)\s*:?'),('bank_name',r'^Bank(?:\s*Name)?\s*:?(?=\s|$)'),
+                ('account_no',r'^A/?c\.?\s*No\.?\s*:?'),('branch',r'^Branch\s*:?'),('iban',r'^IBAN\s*:?'),
+                ('swift',r'^SWIFT(?:\s*Code)?\s*:?')]}
             if any(bank.values()):data['bank_details']=bank
         # Preserve explicit unfamiliar labels without guessing their canonical
         # meaning. Invoices vary; a printed purchase-order or delivery reference

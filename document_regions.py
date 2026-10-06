@@ -7,7 +7,7 @@ def receipt_region(words, width=None, height=None):
     width = width or max((w.get('left', 0)+w.get('width', 0) for w in words), default=1)
     height = height or max((w.get('top', 0)+w.get('height', 0) for w in words), default=1)
     strong = [w for w in words if center(w)[1]<height*.4 and
-              (contains(w.get('text',''),('mada','مدى')) or re.search(r'\d{3,}[*+]{3,}\d+',w.get('text','')))]
+              (contains(w.get('text',''),('mada','مدى','span')) or re.search(r'\d{3,}[*+]{3,}\d+',w.get('text','')))]
     if len(strong) < 2:
         return None
     cx=sum(center(w)[0] for w in strong)/len(strong)

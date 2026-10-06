@@ -10,14 +10,14 @@ ALIASES = {
     'description': ('nature of goods or services','طبيعة البضائع والخدمات','طبيعة السلع أو الخدمات','item name','item description','اسم السلعة','description','product','product description','وصف','الوصف','البيان','اسم الصنف','وصف الصنف'),
     'quantity': ('quantity','qty','الكمية','كمية'),
     'unit_price': ('unit price','rate','price','price per unit','السعر','سعر الوحدة','سعر افرادي','سعر أفرادي','سعر الوحدة بدون الضريبة'),
-    'amount': ('item price','taxable value','taxable amount','taxable','line amount','net amount','amount','total','القيمة الخاضعة','المبلغ الخاضع','المبلغ الخاضع للضريبة','الاجمالي','الإجمالي'),
-    'item_code': ('product no','item code','item id','item no','sku','product code','material code','رمز الصنف','رقم الصنف','كود الصنف','رقم المنتج','كود المنتج','رقم المادة','كود المادة'),
+    'amount': ('item price','taxable value','taxable amount','taxable','line amount','net amount','amount','total','القيمة الخاضعة','المبلغ الخاضع','المبلغ الخاضع للضريبة','الاجمالي','الإجمالي','المبلغ'),
+    'item_code': ('product no','item code','item id','item no','sku','product code','material code','رمز الصنف','رقم الصنف','كود الصنف','رقم المنتج','كود المنتج','رقم المادة','كود المادة','رقم مواد'),
     'serial': ('s no','sn','الرقم','مسلسل'),
     'unit': ('uom','unit','الوحدة'),
-    'vat_amount': ('tax','ضريبة','vat amount','tax amount','vat','الضريبة','قيمة الضريبة','قيمة الضريبية','مبلغ الضريبة'),
+    'vat_amount': ('tax','ضريبة','vat amount','tax amount','vat','الضريبة','قيمة الضريبة','قيمة الضريبية','مبلغ الضريبة','القيمة المضافة','القيمة الضريبية','القيمة الضريية'),
     'vat_rate': ('tax rate','vat rate','نسبة الضريبة','نسبة ضريبة القيمة المضافة'),
     'discount': ('discount','خصم'),
-    'gross_amount': ('incl vat','item subtotal','including vat','total including vat','المجموع شامل الضريبة','الإجمالي شامل الضريبة','المبلغ شامل الضريبة'),
+    'gross_amount': ('incl vat','incl tax','sub total incl tax','item subtotal','المبلغ الإجمالي','including vat','total including vat','المجموع شامل الضريبة','الإجمالي شامل الضريبة','المبلغ شامل الضريبة','المبلغ مع الضريبة','شامل الضريبة','الاجمالي النهائي','الإجمالي النهائي','الاجمالي النهاني'),
 }
 
 INVOICE_LABELS = (
@@ -82,6 +82,7 @@ def geometry(words):
 
 def header_match(text,aliases):
     # Keep the original evidence; separate joined Arabic headers only for matching.
+    text=text.replace('ى','ي')  # الإجمالى / الإجمالي
     separated=re.sub(r'(?<=\S)(الوحدة|الكمية|الضريبة|السعر|المبلغ|القيمة|الصنف|الخصم|النسبة)',r' \1',text)
     return contains(separated,aliases)
 
@@ -214,7 +215,8 @@ def section_address(words, start_y, end_y, h, row_y=None):
         text=normalize(text).strip(' .,:;/|-')
         if not text or number_string(text,{15}) or contains(text,(
                 'customer','invoice','tax code','vat','commercial registration','c.r','العميل',
-                'الفاتورة','الضريبي','السجل التجاري')):
+                'الفاتورة','الضريبي','السجل التجاري','number','version','amount','total',
+                'للعميل','المبلغ','الإجمالي','رقم','date','due','تاريخ')):
             return False
         if kind=='number':return bool(re.fullmatch(r'\d{3,10}',text))
         if kind=='short':return bool(re.fullmatch(r'(?i)[A-Z]{2,8}\s*\d{3,10}',text))
@@ -254,6 +256,31 @@ def header_hint(words):
     return None
 
 
+def stack_headers(band, h, y, column_x):
+    """Join header fragments printed on successive lines of one column.
+
+    Two-line headings ("سعر" over "الوحدة", "المبلغ" over "الإجمالي") reach OCR
+    as separate boxes; neither half names the column on its own.
+    """
+    # Headings carry no long digit runs; codes and values below must not join them.
+    texts=[w for w in band if numeric(w['text']) is None and not re.search(r'\d{2,}',w['text'])]
+    groups=[]
+    for w in sorted(texts,key=y):
+        group=next((g for g in groups if abs(column_x(g[-1])-column_x(w))<h*1.2 and
+                    0<y(w)-y(g[-1])<h*1.8),None)
+        if group is not None:group.append(w)
+        else:groups.append([w])
+    merged=[]
+    for group in groups:
+        if len(group)==1:
+            merged.append(group[0]);continue
+        left=min(w['left'] for w in group);right=max(w['left']+w['width'] for w in group)
+        top=min(w['top'] for w in group);bottom=max(w['top']+w['height'] for w in group)
+        merged.append(dict(group[0],text=' '.join(w['text'] for w in group),left=left,top=top,
+                           width=right-left,height=bottom-top,stacked=True))
+    return merged+[w for w in band if w not in texts]
+
+
 def _header_rank(key, word, quantity_word, y):
     """Prefer a cell-local reread over a wide/merged base-OCR header.
 
@@ -278,8 +305,9 @@ def _header_rank(key, word, quantity_word, y):
     )
 
 
-def table(words):
+def table(words, stacked=False):
     h,y=geometry(words)
+    original=words
     words=sorted(words,key=lambda w:(y(w),w.get('left',0),w['text']))
     def column_x(word):
         grid = word.get('grid_column')
@@ -298,6 +326,8 @@ def table(words):
         # Bilingual cells often stack Arabic, English and a short label over
         # four text lines. Three median glyph heights can split one header row.
         band=[w for w in words if abs(y(w)-y(q))<=5*h]
+        if stacked:
+            band=stack_headers(band,h,y,column_x)
         headers={}
         def tax_amount_fragment(word):
             if normalize(word['text']).casefold().strip(' .:') != 'amount':
@@ -314,6 +344,8 @@ def table(words):
                        and abs(column_x(word)-column_x(peer)) < h*1.5 for peer in band if peer is not word)
         for key,aliases in ALIASES.items():
             choices=[w for w in band if header_match(w['text'],aliases)]
+            if key=='vat_rate' and not choices:
+                choices=[w for w in band if w['text'].strip().endswith('%') and not re.search(r'\d',w['text'])]
             if key=='item_code' and not choices:
                 choices=[w for w in band if w['text'].strip().casefold()=='item']
             if key=='item_code':
@@ -328,12 +360,14 @@ def table(words):
                 choices=[w for w in choices if not contains(w['text'],('tax rate',)) and not stacked_tax_rate(w)]
             if key=='vat_amount':
                 choices += [w for w in band if tax_amount_fragment(w) and w not in choices]
-                choices=[w for w in choices if not stacked_tax_rate(w) and not contains(w['text'],('tax code','vat code','vat number','vat no','tax number','tax no','الرقم الضريبي','رقم الضريبية','رقم الضريبة','رمز الضريبة','tax rate','vat rate','without vat','including vat','شامل الضريبة','بدون الضريبة','نسبة الضريبة'))
+                # "الضريبة %" heads a rate column; "VAT 15%" still names the VAT amount.
+                choices=[w for w in choices if not (w['text'].strip().endswith('%') and not re.search(r'\d',w['text']))]
+                choices=[w for w in choices if not stacked_tax_rate(w) and not contains(w['text'],('tax code','vat code','vat number','vat no','tax number','tax no','الرقم الضريبي','رقم الضريبية','رقم الضريبة','رمز الضريبة','tax rate','vat rate','without vat','including vat','incl tax','شامل الضريبة','مع الضريبة','بدون الضريبة','نسبة الضريبة','النهائي','النهاني'))
                          and not (header_match(w['text'],ALIASES['amount']) and
                                   not contains(w['text'],('vat amount','tax amount','مبلغ الضريبة','قيمة الضريبة')) and not tax_amount_fragment(w))]
             if key=='amount':
                 choices=[w for w in choices if not tax_amount_fragment(w) and not contains(w['text'],('vat amount','tax amount','total with vat','total including vat','total (excl) vat',
-                                                                 'مبلغ الضريبة','قيمة الضريبة','شامل الضريبة'))]
+                                                                 'incl tax','مبلغ الضريبة','قيمة الضريبة','شامل الضريبة','مع الضريبة','النهائي','النهاني'))]
             if key == 'amount':
                 # Explicit taxable headings outrank generic 'Amount', including
                 # focused OCR fragments from a neighbouring tax column.
@@ -341,7 +375,7 @@ def table(words):
                 if explicit:
                     choices=explicit
                 else:
-                    direct=[w for w in choices if normalize(w['text']).casefold().strip(' .:') in ('amount','item price','line amount')]
+                    direct=[w for w in choices if normalize(w['text']).casefold().strip(' .:') in ('amount','item price','line amount','المبلغ')]
                     if direct:
                         choices=direct
             if key not in {'description', 'item_code', 'serial'}:
@@ -457,7 +491,7 @@ def table(words):
             tv=numeric(tax['text']) if tax else None
             dv=numeric(discount['text']) if discount else None
             gross_word=cell('gross_amount')
-            unit_word=min((w for w in row if 'unit' in hx and abs(column_x(w)-hx['unit'])<tolerance('unit') and re.fullmatch(r'(?i)pcs?\.?|sets?|kg|m|ltr|box|roll|pairs?|packs?|ea|bag|drm|gal',w['text'].strip())),key=lambda w:abs(column_x(w)-hx['unit']),default=None)
+            unit_word=min((w for w in row if 'unit' in hx and abs(column_x(w)-hx['unit'])<tolerance('unit') and re.fullmatch(r'(?i)pcs?\.?|sets?|kg|m|ltr|box|roll|pairs?|packs?|ea|bag|drm|gal|nos?|حبة|حبه|علبة|كرتون',w['text'].strip())),key=lambda w:abs(column_x(w)-hx['unit']),default=None)
             # Units and percentages are often printed on a second line of the
             # quantity/VAT cell, without a separate unit/rate column.
             lower = (y(unique[i-1]) + y(anchor))/2 if i else header_y+h*.6
@@ -529,9 +563,24 @@ def table(words):
             ev['description']=[proof(w) for w in desc]
             if unit_word:ev['unit']=proof(unit_word)
             if rate_word:ev['tax_rate']=proof(rate_word)
-            rtl_description=any(has_arabic(w['text']) for w in desc)
-            items.append(dict(line_no=len(items)+1,item_code=normalize(code['text']) if code and (code.get('source')=='native_text' or code.get('confidence',0)>=85) else None,
-                description=' '.join(w['text'] for w in sorted(desc,key=lambda w:(round(y(w)/h),-w['left'] if rtl_description else w['left']))),
+            def rtl_line(word,words):
+                # Order each visual line by its own script: a Latin-only line of a
+                # bilingual description still reads left to right.
+                line=[w for w in words if round(y(w)/h)==round(y(word)/h)]
+                return any(has_arabic(w['text']) for w in line)
+            description=' '.join(w['text'] for w in sorted(desc,key=lambda w:(round(y(w)/h),-w['left'] if rtl_line(w,desc) else w['left'])))
+            item_code=normalize(code['text']) if code and (code.get('source')=='native_text' or code.get('confidence',0)>=85) else None
+            if item_code is None and headers.get('item_code') is headers['description']:
+                # One stacked "code / description" column: the code leads the cell,
+                # optionally after the printed line number.
+                m=re.match(r'^(?:\d{1,3}\s+)?([A-Z0-9][A-Z0-9/-]{3,})\s+(.+)$',description)
+                owner=next((w for w in desc if m and m[1] in w['text']),None)
+                if m and re.search(r'\d',m[1]) and re.search(r'[A-Z]',m[1]) and owner and \
+                        (owner.get('source')=='native_text' or owner.get('confidence',0)>=85):
+                    item_code,description=m[1],m[2]
+                    ev['item_code']=proof(owner)
+            items.append(dict(line_no=len(items)+1,item_code=item_code,
+                description=description,
                 quantity=qty,unit=unit_value if unit_word else None,tax_rate=rate_value,unit_price=pv,amount=av,vat_amount=tv,discount=dv,gross_amount=gross,
                 printed_amount=printed_amount if derived else None,
                 printed_vat_amount=printed_vat_amount if derived else None,
@@ -539,6 +588,9 @@ def table(words):
                 field_evidence=ev))
         if items:
             return items,header_y,h
+    if not stacked:
+        # Retry only an unrecognised table with two-line headings joined.
+        return table(original, stacked=True)
     return [],None,h
 
 
@@ -673,7 +725,21 @@ def parse_layout(pages,filename,language):
             if m: inv=keep('invoice.invoice_number',w,m[1]);break
             if value and (value.get('source') == 'native_text' or float(value.get('confidence') or 0) >= 80):
                 inv=keep('invoice.invoice_number',value,normalize(value['text']).lstrip(':# '));break
-    pattern=r'(?i)\b(?:\d{1,2}[-/]\d{1,2}[-/]20\d{2}|20\d{2}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}\s+(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+20\d{2})\b'
+    # Numeric (/ - .) and month-name ("11-Mar-2026", "18 June 2026") printed dates.
+    pattern=r'(?i)\b(?:\d{1,2}[-/.]\d{1,2}[-/.]20\d{2}|20\d{2}[-/.]\d{1,2}[-/.]\d{1,2}|\d{1,2}[\s-]+(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)[\s-]+20\d{2})\b'
+    def nearest_date(label,fallback):
+        right=label['left']+label['width']
+        options=[]
+        for word in words:
+            if word is label or abs(y(word)-y(label))>h*.95:continue
+            text=normalize(word['text'])
+            for m in re.finditer(pattern,text):
+                x=word['left']+word['width']*(m.start()+m.end())/2/max(len(text),1)
+                options.append((abs(x-(right+label['left'])/2),word,m[0]))
+        if not options:
+            return fallback,re.search(pattern,normalize(fallback['text']))[0]
+        _,word,value=min(options,key=lambda o:o[0])
+        return word,value
     for w in words:
         if w.get('retry_kind')=='date':
             date=keep('invoice.date',w,w['text'])
@@ -681,8 +747,14 @@ def parse_layout(pages,filename,language):
             break
         if contains(w['text'],DATE_LABELS) and not contains(w['text'],('due','delivery','supply date','date of supply','استحقاق','تسليم','توريد')):
             target=w if re.search(pattern,normalize(w['text'])) else near(w,lambda s:re.search(pattern,normalize(s)))
+            if target and target is not w:
+                # A handwritten received-date is often written beside the printed
+                # one and OCR may merge them. The printed value sits nearest the label.
+                target,printed=nearest_date(w,target)
+            elif target:
+                printed=re.search(pattern,normalize(target['text']))[0]
             if target:
-                date=keep('invoice.date',target,re.search(pattern,normalize(target['text']))[0])
+                date=keep('invoice.date',target,printed)
                 match=re.search(r'\b\d{2}:\d{2}(?::\d{2})?\b',target['text'])
                 if match:time=keep('invoice.time',target,match[0])
                 if time is None:
@@ -781,12 +853,13 @@ def parse_layout(pages,filename,language):
             w=max(candidates,key=lambda word:(len(re.findall(r'[A-Za-z]',word['text'])),word['width']),default=None)
         return keep('supplier.name_ar' if arabic else 'supplier.name_en',w)
     name_ar,name_en=company(True),company(False)
-    pay_label=next((w for w in words if contains(w['text'],('payment method','payment mthd','payment methd','payment type','طريقة الدفع','نوع الدفع'))),None)
+    pay_label=next((w for w in words if contains(w['text'],('payment method','payment mthd','payment methd','payment type','payment terms','terms','طريقة الدفع','نوع الدفع'))),None)
     payment_words=[w for w in words if not contains(w['text'],('credit day','credit days','credit limit','card number','card no'))]
-    pay=next((w for w in payment_words if contains(w['text'],('cash','card','credit','mada','span','network','بالنقد','نقدي','بطاقة','مدى','شبكة مدي','شبكةمدي'))),None)
+    methods=('cash','card','credit','mada','span','network','بالنقد','نقدي','نقدا','نقداً','نقدية','بطاقة','مدى','شبكة مدي','شبكةمدي')
+    pay=next((w for w in payment_words if contains(w['text'],methods)),None)
     if pay_label:
-        pay=pay_label if any(token in normalize(pay_label['text']).casefold() for token in ('cash','card','credit','mada','span','بالنقد','نقدي','بطاقة','مدى','شبكةمدي')) else near(
-            pay_label,lambda s:not contains(s,('credit day','credit days','credit limit','card number','card no')) and contains(s,('cash','card','credit','mada','span','network','بالنقد','نقدي','بطاقة','مدى','شبكة مدي','شبكةمدي')),below=2)
+        pay=pay_label if any(token in normalize(pay_label['text']).casefold() for token in ('cash','card','credit','mada','span','بالنقد','نقدي','نقدا','نقدية','بطاقة','مدى','شبكةمدي')) else near(
+            pay_label,lambda s:not contains(s,('credit day','credit days','credit limit','card number','card no')) and contains(s,methods),below=2)
     payment=None
     if pay:
         raw_payment=normalize(pay['text']).strip(' :')
@@ -882,6 +955,15 @@ def parse_layout(pages,filename,language):
     net=total('totals.net_amount',('grand total','invoice total','amount due','net amount','net total','total with vat','total including vat','total amt including vat','including vat',
         'after tax','الإجمالي بما','قيمة الفاتورة مع الضريبة','المبلغ المستحق','إجمالي الفاتورة','الإجمالي شامل','الإجمالي بعد الضريبة',
         'إجمالي المبلغ شامل الضريبة','إجمالي المبلغ المستحق','المجموع شامل القيمة المضافة','المبلغ الصافي'))
+    vat_summary={}
+    if summary:
+        row_y=fy(summary['subtotal'])
+        code=min((w for w in footer if re.fullmatch(r'[SZEO]',w['text'].strip()) and abs(fy(w)-row_y)<fh*.8),
+                 key=lambda w:abs(fy(w)-row_y),default=None)
+        vat_summary=dict(before_tax=keep('vat_summary.before_tax',summary['subtotal'],numeric(summary['subtotal']['text'])),
+                         tax_amount=keep('vat_summary.tax_amount',summary['vat_amount'],numeric(summary['vat_amount']['text'])),
+                         inc_tax=keep('vat_summary.inc_tax',summary['net_amount'],numeric(summary['net_amount']['text'])),
+                         tax_code=keep('vat_summary.tax_code',code,code['text'].strip()) if code else None)
     if subtotal is None and 'subtotal' in summary:
         subtotal=keep('totals.subtotal',summary['subtotal'],numeric(summary['subtotal']['text']))
     if vat is None and 'vat_amount' in summary:
@@ -913,4 +995,4 @@ def parse_layout(pages,filename,language):
                             taxable_amount=total('totals.taxable_amount',('total taxable amount','total taxble amount','total taxable amount excluding vat','total taxble amount excluding vat','المبلغ الخاضع للضريبة','إجمالي المبلغ الخاضع','الإجمالي الخاضع للضريبة')),
                             other_charges=total('totals.other_charges',('other charges','additional charges','shipping charges','الاعباء','الأعباء','رسوم إضافية','رسوم الشحن')),
                             discount=total('totals.discount',('discount','discounts','dscounts','خصم','الخصومات','الحسم')),vat_rate=rate,vat_amount=vat,net_amount=net,currency=currency),
-                field_evidence=evidence,receipt_regions=receipts)
+                vat_summary=vat_summary,field_evidence=evidence,receipt_regions=receipts)

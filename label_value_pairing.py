@@ -150,6 +150,23 @@ def apply_invoice_number_candidates(result, pages):
     quality['invoice_number_candidates'] = candidates
     invoice = data.setdefault('invoice', {})
     existing = invoice.get('invoice_number')
+    existing_evidence = data.get('field_evidence', {}).get('invoice.invoice_number') or {}
+    def dropped_digits(short, full):
+        it = iter(full)
+        return len(short) < len(full) and all(ch in it for ch in short)
+    if (existing not in (None, '') and str(existing) != selected['value'] and existing_evidence and
+            float(selected.get('confidence') or 0) >= 95 and
+            existing_evidence.get('source') != 'native_text' and
+            float(existing_evidence.get('confidence') or 0) < 90 and
+            dropped_digits(str(existing), selected['value'])):
+        # Bilingual headers print the number twice. A weak reading that merely
+        # dropped digits (e.g. Arabic-Indic ٨١٩ for 8109) yields to a confident
+        # reading of the same number; an unrelated number (handwriting) never does.
+        quality.update(needs_review=True, overall_status='needs_review')
+        quality.setdefault('review_reasons', []).append(
+            f'invoice.invoice_number readings disagree: {selected["value"]} (confidence '
+            f'{selected.get("confidence")}) replaced {existing}. Verify against the PDF.')
+        existing = None
     if existing not in (None, '') and str(existing) != selected['value']:
         quality.update(needs_review=True, overall_status='needs_review')
         reason = (f'invoice.invoice_number readings disagree: retained {existing}; '
