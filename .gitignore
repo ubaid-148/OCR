@@ -1,4 +1,5 @@
 .paddle-venv/
+.paddlex-cache/
 OCRmyPDF/
 __pycache__/
 *.py[cod]

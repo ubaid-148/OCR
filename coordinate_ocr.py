@@ -11,6 +11,13 @@ from pathlib import Path
 # oneDNN currently fails on some Colab CPU runtimes while converting PIR
 # attributes. The regular Paddle inference path is slower but portable.
 os.environ.setdefault("FLAGS_use_mkldnn", "0")
+# PaddleOCR 3 uses PaddleX for model and temporary-file caching.  Its default
+# cache lives in the user's home directory, which is often read-only for a
+# service process on Windows.  Keep the cache beside the application unless
+# the caller supplied a shared cache location (for example, Colab).
+os.environ.setdefault(
+    "PADDLE_PDX_CACHE_HOME", str(Path(__file__).resolve().parent / ".paddlex-cache")
+)
 
 import pypdfium2 as pdfium
 import paddle

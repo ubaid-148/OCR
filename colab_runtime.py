@@ -34,6 +34,9 @@ def configure_environment(use_gpu: bool) -> None:
     os.environ.setdefault("OCR_FORCE_RASTER", "false")
     os.environ["USE_LOCAL_AI"] = "false"
     os.environ["OCR_DEVICE"] = "gpu:0" if use_gpu else "cpu"
+    # Keep PaddleX model/temp files in Colab's writable workspace rather than
+    # relying on whichever home directory the notebook runtime exposes.
+    os.environ.setdefault("PADDLE_PDX_CACHE_HOME", "/content/.paddlex-cache")
     os.environ.pop("OCR_PYTHON_EXE", None)
     os.environ.setdefault("FLAGS_use_mkldnn", "0")
 
