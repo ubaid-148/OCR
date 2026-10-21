@@ -37,7 +37,11 @@ def cloudflared(project: Path) -> str:
     target = project / ".colab-cloudflared"
     if not target.exists():
         print("Downloading Cloudflare temporary tunnel client...", flush=True)
-        subprocess.run(["curl", "-fsSL", CLOUDFLARED_URL, "-o", str(target)], check=True)
+        subprocess.run(
+            ["curl", "-fsSL", "--connect-timeout", "20", "--max-time", "120",
+             CLOUDFLARED_URL, "-o", str(target)],
+            check=True,
+        )
         target.chmod(0o755)
     return str(target)
 
@@ -62,21 +66,29 @@ def main() -> int:
             if api.poll() is not None:
                 raise RuntimeError("OCR API stopped during startup. Check " + str(api_log))
 
+            tunnel_log_path = project / "cloudflared.log"
+            tunnel_log = tunnel_log_path.open("w", encoding="utf-8")
             tunnel = subprocess.Popen(
                 [cloudflared(project), "tunnel", "--url", f"http://127.0.0.1:{args.port}"],
-                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                stdout=tunnel_log, stderr=subprocess.STDOUT, text=True,
             )
             print("Creating public API URL...", flush=True)
             public_url = None
             deadline = time.monotonic() + 60
             while time.monotonic() < deadline:
-                line = tunnel.stdout.readline()
-                match = re.search(r"https://[-a-z0-9]+\\.trycloudflare\\.com", line)
+                tunnel_log.flush()
+                log_text = tunnel_log_path.read_text(encoding="utf-8", errors="replace")
+                match = re.search(r"https://[-a-z0-9]+\\.trycloudflare\\.com", log_text)
                 if match:
                     public_url = match.group(0)
                     break
+                if tunnel.poll() is not None:
+                    raise RuntimeError("Tunnel stopped. Log:\n" + log_text[-2000:])
+                time.sleep(0.5)
             if not public_url:
-                raise RuntimeError("Tunnel URL was not created. Check network access and retry.")
+                raise RuntimeError(
+                    "Tunnel URL was not created within 60 seconds. Log:\n" + log_text[-2000:]
+                )
 
             print("\nPOSTMAN API URL (POST):", public_url + "/api/v1/extract", flush=True)
             print("Body: form-data | document: File (PDF) | languages: eng+ara", flush=True)
@@ -87,6 +99,8 @@ def main() -> int:
         except KeyboardInterrupt:
             print("Stopping OCR API and tunnel.", flush=True)
         finally:
+            if "tunnel_log" in locals():
+                tunnel_log.close()
             for process in (locals().get("tunnel"), api):
                 if process and process.poll() is None:
                     process.send_signal(signal.SIGTERM)
