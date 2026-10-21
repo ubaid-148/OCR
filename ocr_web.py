@@ -35,6 +35,7 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 PROGRESS = {}
 UPLOAD_SLOT = threading.BoundedSemaphore(1)
+API_EXTRACT_PATH = "/api/v1/extract"
 
 
 def multipart_form_fields(message) -> dict[str, object]:
@@ -89,6 +90,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             self.send_response(status)
             self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Access-Control-Allow-Origin", "*")
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()
             self.wfile.write(data)
@@ -97,6 +99,22 @@ class Handler(BaseHTTPRequestHandler):
             self.log_message('Browser disconnected before response delivery; no error response will be retried.')
             return False
         return True
+
+    def send_api_info(self) -> None:
+        """Describe the stable, file-upload API without requiring a UI visit."""
+        self.send_json({
+            "service": "local-invoice-ocr",
+            "version": "v1",
+            "extract": {
+                "method": "POST",
+                "path": API_EXTRACT_PATH,
+                "content_type": "multipart/form-data",
+                "file_field": "document (or pdf for compatibility)",
+                "optional_fields": {"languages": "eng+ara (default), eng, ara, urd, or eng+urd"},
+                "response": "The same canonical invoice JSON returned by the web uploader.",
+                "limits": {"max_document_size_mb": MAX_UPLOAD_BYTES // (1024 * 1024), "formats": ["pdf"]},
+            },
+        })
 
     def send_failure(self, message, status, partial_payload=None):
         self.send_json(error_invoice_response(status, message, partial_payload), status)
@@ -109,6 +127,9 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self) -> None:
+        if self.path == API_EXTRACT_PATH:
+            self.send_api_info()
+            return
         if self.path == '/app.js':
             data = (ROOT / 'app.js').read_bytes()
             self.send_response(200)
@@ -127,6 +148,9 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(404)
 
     def do_POST(self) -> None:
+        if self.path not in {'/', API_EXTRACT_PATH}:
+            self.send_failure('Unknown endpoint.', 404)
+            return
         if not UPLOAD_SLOT.acquire(blocking=False):
             self.send_failure('Another PDF is processing. Wait for it to finish before uploading again.', 429)
             return
@@ -139,10 +163,17 @@ class Handler(BaseHTTPRequestHandler):
         finally:
             UPLOAD_SLOT.release()
 
-    def process_upload(self) -> None:
-        if self.path != '/':
-            self.send_failure('Unknown endpoint.', 404)
+    def do_OPTIONS(self) -> None:
+        if self.path != API_EXTRACT_PATH:
+            self.send_error(404)
             return
+        self.send_response(204)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Progress-ID")
+        self.end_headers()
+
+    def process_upload(self) -> None:
         try:
             length = int(self.headers.get("Content-Length", "0"))
         except ValueError:
@@ -157,13 +188,14 @@ class Handler(BaseHTTPRequestHandler):
         message = BytesParser(policy=policy.default).parsebytes(
             f"Content-Type: {content_type}\r\nMIME-Version: 1.0\r\n\r\n".encode() + body
         )
+        allowed_file_fields = {'pdf'} if self.path == '/' else {'pdf', 'document'}
         pdf_parts = [part for part in message.iter_parts()
-                     if part.get_param('name', header='content-disposition') == 'pdf']
+                     if part.get_param('name', header='content-disposition') in allowed_file_fields]
         if len(pdf_parts) > 1:
-            self.send_failure('Send one PDF per request; the web form queues multiple PDFs automatically.', 400)
+            self.send_failure('Send one PDF per request.', 400)
             return
         fields = multipart_form_fields(message)
-        pdf_part = fields.get("pdf")
+        pdf_part = next((part for part in pdf_parts), None)
         language_part = fields.get("languages")
         if pdf_part is None:
             self.send_failure("No PDF was received.", 400)

@@ -1,0 +1,101 @@
+"""Run the invoice OCR HTTP API in Colab and expose it through a temporary URL.
+
+Run this after ``colab_setup.ipynb`` has prepared the OCR runtime. The process
+stays in the foreground deliberately: stopping the cell ends the public API.
+"""
+from __future__ import annotations
+
+import argparse
+import os
+from pathlib import Path
+import re
+import shutil
+import signal
+import subprocess
+import sys
+import time
+
+
+CLOUDFLARED_URL = (
+    "https://github.com/cloudflare/cloudflared/releases/latest/download/"
+    "cloudflared-linux-amd64"
+)
+
+
+def parser() -> argparse.ArgumentParser:
+    result = argparse.ArgumentParser(description=__doc__)
+    result.add_argument("--ocr-python", default=sys.executable,
+                        help="Python interpreter with PaddleOCR installed")
+    result.add_argument("--port", type=int, default=8765)
+    return result
+
+
+def cloudflared(project: Path) -> str:
+    installed = shutil.which("cloudflared")
+    if installed:
+        return installed
+    target = project / ".colab-cloudflared"
+    if not target.exists():
+        print("Downloading Cloudflare temporary tunnel client...", flush=True)
+        subprocess.run(["curl", "-fsSL", CLOUDFLARED_URL, "-o", str(target)], check=True)
+        target.chmod(0o755)
+    return str(target)
+
+
+def main() -> int:
+    args = parser().parse_args()
+    project = Path(__file__).resolve().parent
+    ocr_python = Path(args.ocr_python).resolve()
+    if not ocr_python.is_file():
+        raise SystemExit(f"OCR Python was not found: {ocr_python}")
+
+    environment = os.environ.copy()
+    environment["OCR_PYTHON_EXE"] = str(ocr_python)
+    api_log = project / "ocr-api.log"
+    with api_log.open("w", encoding="utf-8") as log:
+        api = subprocess.Popen(
+            [str(ocr_python), "-u", str(project / "ocr_web.py")],
+            cwd=project, env=environment, stdout=log, stderr=subprocess.STDOUT,
+        )
+        try:
+            time.sleep(2)
+            if api.poll() is not None:
+                raise RuntimeError("OCR API stopped during startup. Check " + str(api_log))
+
+            tunnel = subprocess.Popen(
+                [cloudflared(project), "tunnel", "--url", f"http://127.0.0.1:{args.port}"],
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+            )
+            print("Creating public API URL...", flush=True)
+            public_url = None
+            deadline = time.monotonic() + 60
+            while time.monotonic() < deadline:
+                line = tunnel.stdout.readline()
+                match = re.search(r"https://[-a-z0-9]+\\.trycloudflare\\.com", line)
+                if match:
+                    public_url = match.group(0)
+                    break
+            if not public_url:
+                raise RuntimeError("Tunnel URL was not created. Check network access and retry.")
+
+            print("\nPOSTMAN API URL (POST):", public_url + "/api/v1/extract", flush=True)
+            print("Body: form-data | document: File (PDF) | languages: eng+ara", flush=True)
+            print("Keep this cell running. Ctrl+C stops the API and closes the URL.\n", flush=True)
+            while api.poll() is None and tunnel.poll() is None:
+                time.sleep(1)
+            raise RuntimeError("The OCR API or tunnel stopped. Check " + str(api_log))
+        except KeyboardInterrupt:
+            print("Stopping OCR API and tunnel.", flush=True)
+        finally:
+            for process in (locals().get("tunnel"), api):
+                if process and process.poll() is None:
+                    process.send_signal(signal.SIGTERM)
+                    try:
+                        process.wait(timeout=10)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
