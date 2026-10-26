@@ -52,6 +52,22 @@ def cloudflared(project: Path) -> str:
     return str(target)
 
 
+def ensure_runtime_package(ocr_python: Path, module: str, requirement: str) -> None:
+    """Install a required OCR-runtime wheel when a reused Colab venv lacks it."""
+    check = subprocess.run(
+        [str(ocr_python), "-c", f"import {module}"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    if check.returncode == 0:
+        return
+    print(f"Installing missing OCR dependency: {requirement}", flush=True)
+    subprocess.run(
+        [str(ocr_python), "-m", "pip", "install", "-q", requirement],
+        check=True,
+    )
+
+
 def main() -> int:
     args = parser().parse_args()
     project = Path(__file__).resolve().parent
@@ -61,6 +77,7 @@ def main() -> int:
 
     server_name = "OpenAPI / Swagger" if args.openapi else "legacy OCR"
     print(f"Starting {server_name} server on port {args.port}...", flush=True)
+    ensure_runtime_package(ocr_python, "pypdfium2", "pypdfium2==5.13.0")
 
     environment = os.environ.copy()
     environment["OCR_PYTHON_EXE"] = str(ocr_python)
