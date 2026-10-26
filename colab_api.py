@@ -82,7 +82,10 @@ def main() -> int:
             tunnel_log_path = project / "cloudflared.log"
             tunnel_log = tunnel_log_path.open("w", encoding="utf-8")
             tunnel = subprocess.Popen(
-                [cloudflared(project), "tunnel", "--url", f"http://127.0.0.1:{args.port}"],
+                # Colab can pass QUIC pre-checks but still stall before issuing
+                # a Quick Tunnel address. HTTP/2 is the documented TCP fallback.
+                [cloudflared(project), "tunnel", "--protocol", "http2",
+                 "--url", f"http://127.0.0.1:{args.port}"],
                 stdout=tunnel_log, stderr=subprocess.STDOUT, text=True,
             )
             print("Creating public API URL...", flush=True)
