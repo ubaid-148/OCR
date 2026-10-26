@@ -4,4 +4,7 @@ pypdfium2==5.13.0
 pdfplumber>=0.11,<1
 Pillow>=10,<13
 ocrmypdf
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+python-multipart>=0.0.9
 

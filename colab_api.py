@@ -27,6 +27,11 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--ocr-python", default=sys.executable,
                         help="Python interpreter with PaddleOCR installed")
     result.add_argument("--port", type=int, default=8765)
+    result.add_argument(
+        "--openapi",
+        action="store_true",
+        help="Run the Swagger/OpenAPI server instead of the legacy web handler.",
+    )
     return result
 
 
@@ -57,9 +62,14 @@ def main() -> int:
     environment["OCR_PYTHON_EXE"] = str(ocr_python)
     api_log = project / "ocr-api.log"
     with api_log.open("w", encoding="utf-8") as log:
+        command = (
+            [str(ocr_python), "-m", "uvicorn", "openapi_server:app",
+             "--host", "127.0.0.1", "--port", str(args.port)]
+            if args.openapi
+            else [str(ocr_python), "-u", str(project / "ocr_web.py")]
+        )
         api = subprocess.Popen(
-            [str(ocr_python), "-u", str(project / "ocr_web.py")],
-            cwd=project, env=environment, stdout=log, stderr=subprocess.STDOUT,
+            command, cwd=project, env=environment, stdout=log, stderr=subprocess.STDOUT,
         )
         try:
             time.sleep(2)
@@ -91,6 +101,8 @@ def main() -> int:
                 )
 
             print("\nPOSTMAN API URL (POST):", public_url + "/api/v1/extract", flush=True)
+            if args.openapi:
+                print("Swagger documentation:", public_url + "/docs", flush=True)
             print("Body: form-data | document: File (PDF) | languages: eng+ara", flush=True)
             print("Keep this cell running. Ctrl+C stops the API and closes the URL.\n", flush=True)
             while api.poll() is None and tunnel.poll() is None:
