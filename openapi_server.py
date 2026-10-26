@@ -11,7 +11,7 @@ import tempfile
 from pathlib import Path
 from time import perf_counter
 
-from fastapi import FastAPI, File, HTTPException, Query, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 MAX_UPLOAD_BYTES = 100 * 1024 * 1024
@@ -43,7 +43,7 @@ def health() -> dict[str, str]:
 @app.post("/api/v1/extract", tags=["OCR"])
 async def extract_invoice(
     document: UploadFile = File(..., description="One PDF invoice (maximum 100 MB)"),
-    languages: str = Query("eng+ara", description="eng, ara, eng+ara, urd, or eng+urd"),
+    languages: str = Form("eng+ara", description="eng, ara, eng+ara, urd, or eng+urd"),
 ) -> dict:
     """Extract a validated canonical invoice JSON document from a PDF."""
     if languages not in ALLOWED_LANGUAGES:
