@@ -58,6 +58,9 @@ def main() -> int:
     if not ocr_python.is_file():
         raise SystemExit(f"OCR Python was not found: {ocr_python}")
 
+    server_name = "OpenAPI / Swagger" if args.openapi else "legacy OCR"
+    print(f"Starting {server_name} server on port {args.port}...", flush=True)
+
     environment = os.environ.copy()
     environment["OCR_PYTHON_EXE"] = str(ocr_python)
     api_log = project / "ocr-api.log"
