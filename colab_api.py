@@ -87,7 +87,10 @@ def main() -> int:
             )
             print("Creating public API URL...", flush=True)
             public_url = None
-            deadline = time.monotonic() + 60
+            # Recent cloudflared builds may run connectivity pre-checks for more
+            # than one minute in Colab before printing the Quick Tunnel URL.
+            deadline = time.monotonic() + 180
+            next_progress_notice = time.monotonic() + 30
             while time.monotonic() < deadline:
                 tunnel_log.flush()
                 log_text = tunnel_log_path.read_text(encoding="utf-8", errors="replace")
@@ -97,10 +100,13 @@ def main() -> int:
                     break
                 if tunnel.poll() is not None:
                     raise RuntimeError("Tunnel stopped. Log:\n" + log_text[-2000:])
+                if time.monotonic() >= next_progress_notice:
+                    print("Still waiting for Cloudflare tunnel URL...", flush=True)
+                    next_progress_notice += 30
                 time.sleep(0.5)
             if not public_url:
                 raise RuntimeError(
-                    "Tunnel URL was not created within 60 seconds. Log:\n" + log_text[-2000:]
+                    "Tunnel URL was not created within 180 seconds. Log:\n" + log_text[-2000:]
                 )
 
             print("\nPOSTMAN API URL (POST):", public_url + "/api/v1/extract", flush=True)
