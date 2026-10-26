@@ -20,6 +20,7 @@ CLOUDFLARED_URL = (
     "https://github.com/cloudflare/cloudflared/releases/latest/download/"
     "cloudflared-linux-amd64"
 )
+LOCAL_TUNNEL_URL = re.compile(r"https://[-a-z0-9]+\.loca\.lt", re.IGNORECASE)
 
 
 def parser() -> argparse.ArgumentParser:
@@ -92,7 +93,7 @@ def main() -> int:
             public_url = None
             # Recent cloudflared builds may run connectivity pre-checks for more
             # than one minute in Colab before printing the Quick Tunnel URL.
-            deadline = time.monotonic() + 180
+            deadline = time.monotonic() + 60
             next_progress_notice = time.monotonic() + 30
             while time.monotonic() < deadline:
                 tunnel_log.flush()
@@ -108,9 +109,42 @@ def main() -> int:
                     next_progress_notice += 30
                 time.sleep(0.5)
             if not public_url:
-                raise RuntimeError(
-                    "Tunnel URL was not created within 180 seconds. Log:\n" + log_text[-2000:]
+                # Quick Tunnels sometimes finish their connectivity checks but
+                # fail to provision an address. Keep the API usable in Colab.
+                print("Cloudflare did not issue a URL; trying localtunnel fallback...", flush=True)
+                if tunnel.poll() is None:
+                    tunnel.send_signal(signal.SIGTERM)
+                    try:
+                        tunnel.wait(timeout=10)
+                    except subprocess.TimeoutExpired:
+                        tunnel.kill()
+                tunnel_log.close()
+                localtunnel_log_path = project / "localtunnel.log"
+                tunnel_log = localtunnel_log_path.open("w", encoding="utf-8")
+                npx = shutil.which("npx")
+                if not npx:
+                    raise RuntimeError(
+                        "Cloudflare did not issue a URL and npx is unavailable. Cloudflare log:\n"
+                        + log_text[-2000:]
+                    )
+                tunnel = subprocess.Popen(
+                    [npx, "--yes", "localtunnel", "--port", str(args.port)],
+                    stdout=tunnel_log, stderr=subprocess.STDOUT, text=True,
                 )
+                deadline = time.monotonic() + 90
+                fallback_log = ""
+                while time.monotonic() < deadline:
+                    tunnel_log.flush()
+                    fallback_log = localtunnel_log_path.read_text(encoding="utf-8", errors="replace")
+                    match = LOCAL_TUNNEL_URL.search(fallback_log)
+                    if match:
+                        public_url = match.group(0)
+                        break
+                    if tunnel.poll() is not None:
+                        raise RuntimeError("localtunnel stopped. Log:\n" + fallback_log[-2000:])
+                    time.sleep(0.5)
+                if not public_url:
+                    raise RuntimeError("localtunnel did not issue a URL. Log:\n" + fallback_log[-2000:])
 
             print("\nPOSTMAN API URL (POST):", public_url + "/api/v1/extract", flush=True)
             if args.openapi:
